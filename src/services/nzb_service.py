@@ -1,10 +1,10 @@
-from importlib import import_module as import_from_module
 """NZB service for downloading from Usenet"""
 from typing import Optional, Dict, Any
 import nntplib
 import logging
 import asyncio
 from dataclasses import dataclass
+from importlib import import_module as import_from_module
 
 logger = logging.getLogger(__name__)
 
@@ -56,27 +56,70 @@ class NZBService:
             'server_errors': 0
         }
     
+    async def add_nzb_download(self, nzb_content: str, filename: str, download_path: str):
+        """Add a new NZB download job"""
+        try:
+            # Parse the NZB content
+            import xml.etree.ElementTree as ET
+            from io import StringIO
+            
+            tree = ET.parse(StringIO(nzb_content))
+            root = tree.getroot()
+            
+            # Extract segments
+            segments = []
+            for file_elem in root.findall('.//{http://www.newzbin.com/DTD/2003/nzb}file'):
+                for seg in file_elem.findall('.//{http://www.newzbin.com/DTD/2003/nzb}segment'):
+                    segments.append({
+                        'message_id': seg.text.strip(),
+                        'number': int(seg.get('number', 1)),
+                        'bytes': int(seg.get('bytes', 0))
+                    })
+            
+            # Sort segments by number
+            segments.sort(key=lambda x: x['number'])
+            
+            # Download segments
+            results = []
+            for segment in segments:
+                result = await self.download_segment(
+                    segment['message_id'],
+                    segment['number'],
+                    filename
+                )
+                if result:
+                    results.append(result)
+            
+            # Combine segment data
+            return b''.join(results) if results else None
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to process NZB file: {e}")
+            raise
+
     def _get_connection(self) -> nntplib.NNTP:
         """Get a new NNTP connection"""
-        if self.config.ssl:
-            conn = nntplib.NNTP_SSL(
-                host=self.config.host,
-                port=self.config.port,
-                user=self.config.username,
-                password=self.config.password,
-                timeout=30
-            )
-        else:
-            conn = nntplib.NNTP(
-                host=self.config.host,
-                port=self.config.port,
-                user=self.config.username,
-                password=self.config.password,
-                timeout=30
-            )
-        
-        return conn
-    
+        try:
+            if self.config.ssl:
+                return nntplib.NNTP_SSL(
+                    host=self.config.host,
+                    port=self.config.port,
+                    user=self.config.username,
+                    password=self.config.password,
+                    timeout=30
+                )
+            else:
+                return nntplib.NNTP(
+                    host=self.config.host,
+                    port=self.config.port,
+                    user=self.config.username,
+                    password=self.config.password,
+                    timeout=30
+                )
+        except Exception as e:
+            logger.error(f"Error connecting to NNTP server: {e}")
+            raise
+
     def _update_stats(self, key: str, value: int = 1):
         """Update download statistics"""
         if key in self.stats:
@@ -128,6 +171,9 @@ class NZBService:
             
             article_data = b'\r\n'.join(lines)
             
+            # Log article data for debugging
+            logger.debug(f"Article data for segment {segment_num}:\n{article_data.decode('utf-8', errors='ignore')}")
+            
             # Decode yEnc
             decoded_data = self._decode_yenc_with_fallback(article_data, message_id)
             
@@ -168,43 +214,11 @@ class NZBService:
             return None
         
         # Try fast decoder first
-        if YENC_DECODER_AVAILABLE:
-            try:
-                if 'sabyenc3' in globals():
-                    decoded = None
-                    try:
-                        result = sabyenc3.decode_string(data)
-                        
-                        # Handle different return types from sabyenc3
-                        if isinstance(result, bytes):
-                            decoded = result
-                        elif isinstance(result, (tuple, list)) and len(result) >= 1:
-                            if isinstance(result[0], bytes):
-                                decoded = result[0]
-                            else:
-                                logger.error(f"Unexpected type from sabyenc3 decode: {type(result[0])}")
-                        else:
-                            logger.error(f"Unexpected result type from sabyenc3: {type(result)}")
-                            
-                        if decoded:
-                            return decoded
-                            
-                    except Exception as e:
-                        logger.debug(f"🔧 sabyenc3 decode failed for {message_id}: {e}")
-                        
-                elif 'yenc' in globals():
-                    try:
-                        result = yenc.decode(data)
-                        if isinstance(result, (tuple, list)) and len(result) >= 1:
-                            if isinstance(result[0], bytes):
-                                return result[0]
-                            else:
-                                logger.error(f"Unexpected type from yenc decode: {type(result[0])}")
-                    except Exception as e:
-                        logger.debug(f"🔧 yenc decode failed for {message_id}: {e}")
-                        
-            except Exception as e:
-                logger.debug(f"🔧 Fast yEnc decoder failed for {message_id}: {e}, trying manual decode")
+        result = self._decode_yenc_fast(data, message_id)
+        if result is not None:
+            return result
+
+        logger.debug("Fast yEnc decoder failed, trying manual decode")
         
         # Fallback to manual decoding
         try:
@@ -213,51 +227,22 @@ class NZBService:
             logger.error(f"💥 Manual yEnc decode failed for {message_id}: {e}")
             return None
     
-    def _manual_yenc_decode(self, data: bytes) -> bytes:
-        """Manual yEnc decoding implementation"""
-        # TODO: Implement manual yEnc decoding as final fallback
-        raise NotImplementedError("Manual yEnc decoding not implemented")
-
-    async def add_nzb_download(self, nzb_content: str, filename: str, download_path: str):
-        """Add a new NZB download job"""
-        try:
-            # Parse the NZB content
-            import xml.etree.ElementTree as ET
-            from io import StringIO
-            
-            tree = ET.parse(StringIO(nzb_content))
-            root = tree.getroot()
-            
-            # Extract segments
-            segments = []
-            for file_elem in root.findall('.//{http://www.newzbin.com/DTD/2003/nzb}file'):
-                for seg in file_elem.findall('.//{http://www.newzbin.com/DTD/2003/nzb}segment'):
-                    segments.append({
-                        'message_id': seg.text.strip(),
-                        'number': int(seg.get('number', 1)),
-                        'bytes': int(seg.get('bytes', 0))
-                    })
-            
-            # Sort segments by number
-            segments.sort(key=lambda x: x['number'])
-            
-            # Download segments
-            results = []
-            for segment in segments:
-                result = await self.download_segment(
-                    segment['message_id'],
-                    segment['number'],
-                    filename
-                )
-                if result:
-                    results.append(result)
-            
-            # Combine segment data
-            return b''.join(results) if results else None
-            
-        except Exception as e:
-            logger.error(f"❌ Failed to process NZB file: {e}")
-            raise
+    def _decode_yenc_fast(self, data: bytes, message_id: str) -> Optional[bytes]:
+        """Fast decoding of yEnc using available library"""
+        if YENC_DECODER_AVAILABLE:
+            try:
+                if 'sabyenc3' in globals():
+                    import sabyenc3
+                    result = sabyenc3.decode_string(data)
+                    if isinstance(result, tuple) and len(result) >= 1:
+                        return result[0]
+                    return result
+                elif 'yenc' in globals():
+                    import yenc
+                    return yenc.decode(data)[0]
+            except Exception as e:
+                logger.debug(f"🔧 Fast yEnc decoder failed for {message_id}: {e}")
+        return None
 
 class RetryHandler:
     def __init__(self, max_retries: int = 3, initial_delay: float = 1.0):
