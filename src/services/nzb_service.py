@@ -6,6 +6,8 @@ import asyncio
 from dataclasses import dataclass
 from importlib import import_module as import_from_module
 
+# Configure logging
+logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 YENC_DECODER_AVAILABLE = False
@@ -63,6 +65,7 @@ class NZBService:
             import xml.etree.ElementTree as ET
             from io import StringIO
             
+            logger.debug(f"Parsing NZB content for {filename}")
             tree = ET.parse(StringIO(nzb_content))
             root = tree.getroot()
             
@@ -75,6 +78,8 @@ class NZBService:
                         'number': int(seg.get('number', 1)),
                         'bytes': int(seg.get('bytes', 0))
                     })
+            
+            logger.debug(f"Found {len(segments)} segments in NZB file")
             
             # Sort segments by number
             segments.sort(key=lambda x: x['number'])
@@ -90,8 +95,14 @@ class NZBService:
                 if result:
                     results.append(result)
             
+            logger.debug(f"Successfully downloaded {len(results)} of {len(segments)} segments")
+            
             # Combine segment data
-            return b''.join(results) if results else None
+            if results:
+                combined = b''.join(results)
+                logger.debug(f"Combined data size: {len(combined):,} bytes")
+                return combined
+            return None
             
         except Exception as e:
             logger.error(f"❌ Failed to process NZB file: {e}")
@@ -156,6 +167,7 @@ class NZBService:
             conn = self._get_connection()
             
             # Download article
+            logger.debug(f"Downloading article for segment {segment_num}: {message_id}")
             resp = conn.article(f'<{message_id}>')
             
             # Convert all items to bytes before joining
@@ -172,7 +184,7 @@ class NZBService:
             article_data = b'\r\n'.join(lines)
             
             # Log article data for debugging
-            logger.debug(f"Article data for segment {segment_num}:\n{article_data.decode('utf-8', errors='ignore')}")
+            logger.debug(f"Article data for segment {segment_num} ({len(article_data):,} bytes):\n{article_data[:1000].decode('utf-8', errors='ignore')}")
             
             # Decode yEnc
             decoded_data = self._decode_yenc_with_fallback(article_data, message_id)
