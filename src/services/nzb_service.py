@@ -1,10 +1,8 @@
-# Original file content up to the _download_segment_sync method
-import os
-import asyncio
+from typing import Optional, Dict, Any
 import nntplib
 import logging
-from typing import Optional, List, Tuple, Dict, Any
-from functools import partial
+import asyncio
+from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
@@ -19,66 +17,34 @@ except ImportError:
     except ImportError:
         pass
 
-class NZBDownloadError(Exception):
-    def __init__(self, error_type: str, error_category: str, original_error: Exception = None):
-        self.error_type = error_type
-        self.error_category = error_category
-        self.original_error = original_error
-        super().__init__(f"{error_type}: {error_category}")
-
-def categorize_error(e: Exception) -> str:
-    """Categorize common NZB download errors"""
-    error_str = str(e).lower()
-    
-    if isinstance(e, nntplib.NNTPError):
-        error_code = str(e).split()[0] if str(e) else "unknown"
-        if error_code.startswith('43'):
-            return "ARTICLE_NOT_FOUND"
-        elif error_code.startswith('48'):
-            return "AUTH_REQUIRED"
-        elif error_code.startswith('42'):
-            return "CONNECTION_CLOSED"
-        return "NNTP_ERROR"
-    
-    if "broken pipe" in error_str or "connection reset" in error_str:
-        return "CONNECTION_ERROR"
-    elif "timeout" in error_str:
-        return "TIMEOUT"
-    elif "memory" in error_str:
-        return "MEMORY_ERROR"
-    elif "permission" in error_str:
-        return "PERMISSION_ERROR"
-    elif "disk" in error_str or "space" in error_str:
-        return "DISK_ERROR"
-    
-    return "UNKNOWN_ERROR"
-
-class RetryHandler:
-    def __init__(self, max_retries: int = 3, initial_delay: float = 1.0):
-        self.max_retries = max_retries
-        self.initial_delay = initial_delay
-    
-    async def retry_async(self, func, *args, **kwargs):
-        last_error = None
-        delay = self.initial_delay
-        
-        for attempt in range(self.max_retries):
-            try:
-                return await func(*args, **kwargs)
-            except Exception as e:
-                last_error = e
-                if attempt < self.max_retries - 1:
-                    await asyncio.sleep(delay)
-                    delay *= 2
-        
-        if last_error:
-            raise last_error
+@dataclass
+class NZBConfig:
+    host: str
+    port: int = 119
+    ssl: bool = False
+    username: Optional[str] = None
+    password: Optional[str] = None
+    max_connections: int = 10
+    retention_days: int = 1500
+    download_rate_limit: Optional[int] = None
+    max_retries: int = 3
 
 class NZBService:
     def __init__(self, config: Dict[str, Any]):
-        self.config = config
-        self.retry_handler = RetryHandler()
+        """Initialize NZB service with configuration"""
+        self.config = NZBConfig(
+            host=config.get('usenet_server', 'localhost'),
+            port=config.get('port', 119),
+            ssl=config.get('use_ssl', False),
+            username=config.get('username'),
+            password=config.get('password'),
+            max_connections=config.get('max_connections', 10),
+            retention_days=config.get('retention_days', 1500),
+            download_rate_limit=config.get('download_rate_limit'),
+            max_retries=config.get('max_retries', 3)
+        )
         self.executor = None
+        self.retry_handler = RetryHandler(max_retries=self.config.max_retries)
         self.active_downloads = {}
         self.stats = {
             'total_segments': 0,
@@ -90,26 +56,20 @@ class NZBService:
     
     def _get_connection(self) -> nntplib.NNTP:
         """Get a new NNTP connection"""
-        host = self.config.get('host')
-        port = self.config.get('port', 119)
-        ssl = self.config.get('ssl', False)
-        username = self.config.get('username')
-        password = self.config.get('password')
-        
-        if ssl:
+        if self.config.ssl:
             conn = nntplib.NNTP_SSL(
-                host=host,
-                port=port,
-                user=username,
-                password=password,
+                host=self.config.host,
+                port=self.config.port,
+                user=self.config.username,
+                password=self.config.password,
                 timeout=30
             )
         else:
             conn = nntplib.NNTP(
-                host=host,
-                port=port,
-                user=username,
-                password=password,
+                host=self.config.host,
+                port=self.config.port,
+                user=self.config.username,
+                password=self.config.password,
                 timeout=30
             )
         
@@ -256,3 +216,57 @@ class NZBService:
         # TODO: Implement manual yEnc decoding as final fallback
         raise NotImplementedError("Manual yEnc decoding not implemented")
 
+class RetryHandler:
+    def __init__(self, max_retries: int = 3, initial_delay: float = 1.0):
+        self.max_retries = max_retries
+        self.initial_delay = initial_delay
+    
+    async def retry_async(self, func, *args, **kwargs):
+        last_error = None
+        delay = self.initial_delay
+        
+        for attempt in range(self.max_retries):
+            try:
+                return await func(*args, **kwargs)
+            except Exception as e:
+                last_error = e
+                if attempt < self.max_retries - 1:
+                    await asyncio.sleep(delay)
+                    delay *= 2
+        
+        if last_error:
+            raise last_error
+
+class NZBDownloadError(Exception):
+    def __init__(self, error_type: str, error_category: str, original_error: Exception = None):
+        self.error_type = error_type
+        self.error_category = error_category
+        self.original_error = original_error
+        super().__init__(f"{error_type}: {error_category}")
+
+def categorize_error(e: Exception) -> str:
+    """Categorize common NZB download errors"""
+    error_str = str(e).lower()
+    
+    if isinstance(e, nntplib.NNTPError):
+        error_code = str(e).split()[0] if str(e) else "unknown"
+        if error_code.startswith('43'):
+            return "ARTICLE_NOT_FOUND"
+        elif error_code.startswith('48'):
+            return "AUTH_REQUIRED"
+        elif error_code.startswith('42'):
+            return "CONNECTION_CLOSED"
+        return "NNTP_ERROR"
+    
+    if "broken pipe" in error_str or "connection reset" in error_str:
+        return "CONNECTION_ERROR"
+    elif "timeout" in error_str:
+        return "TIMEOUT"
+    elif "memory" in error_str:
+        return "MEMORY_ERROR"
+    elif "permission" in error_str:
+        return "PERMISSION_ERROR"
+    elif "disk" in error_str or "space" in error_str:
+        return "DISK_ERROR"
+    
+    return "UNKNOWN_ERROR"

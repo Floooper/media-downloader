@@ -1,6 +1,7 @@
 """
 Service Manager - Provides singleton instances of services
 """
+from typing import Dict, Any, Optional
 from .services.download_service import DownloadService
 from .services.queue_service import QueueManager
 from .services.tag_service import TagService
@@ -54,18 +55,21 @@ class ServicesManager:
             from .services.nzb_service import NZBService
             from .config import settings
             
-            # Use current settings (which may have been updated via API)
-            self._nzb_downloader = NZBService(
-                usenet_server=settings.USENET_SERVER,
-                port=settings.USENET_PORT,
-                use_ssl=settings.USENET_SSL,
-                username=settings.USENET_USERNAME,
-                password=settings.USENET_PASSWORD,
-                max_connections=getattr(settings, 'USENET_MAX_CONNECTIONS', 10),
-                retention_days=getattr(settings, 'USENET_RETENTION_DAYS', 1500),
-                download_rate_limit=getattr(settings, 'USENET_DOWNLOAD_RATE_LIMIT', None),
-                max_retries=getattr(settings, 'USENET_MAX_RETRIES', 3)
-            )
+            # Create config dict with current settings
+            config = {
+                'usenet_server': settings.USENET_SERVER,
+                'port': settings.USENET_PORT,
+                'use_ssl': settings.USENET_SSL,
+                'username': settings.USENET_USERNAME,
+                'password': settings.USENET_PASSWORD,
+                'max_connections': getattr(settings, 'USENET_MAX_CONNECTIONS', 10),
+                'retention_days': getattr(settings, 'USENET_RETENTION_DAYS', 1500),
+                'download_rate_limit': getattr(settings, 'USENET_DOWNLOAD_RATE_LIMIT', None),
+                'max_retries': getattr(settings, 'USENET_MAX_RETRIES', 3)
+            }
+            
+            # Initialize NZB service with config
+            self._nzb_downloader = NZBService(config)
             
             # Log the configuration being used (mask password)
             masked_password = "***" if settings.USENET_PASSWORD else "(empty)"
