@@ -1,3 +1,4 @@
+"""NZB service for downloading from Usenet"""
 from typing import Optional, Dict, Any
 import nntplib
 import logging
@@ -216,6 +217,47 @@ class NZBService:
         # TODO: Implement manual yEnc decoding as final fallback
         raise NotImplementedError("Manual yEnc decoding not implemented")
 
+    async def add_nzb_download(self, nzb_content: str, filename: str):
+        """Add a new NZB download job"""
+        try:
+            # Parse the NZB content
+            import xml.etree.ElementTree as ET
+            from io import StringIO
+            
+            tree = ET.parse(StringIO(nzb_content))
+            root = tree.getroot()
+            
+            # Extract segments
+            segments = []
+            for file_elem in root.findall('.//{http://www.newzbin.com/DTD/2003/nzb}file'):
+                for seg in file_elem.findall('.//{http://www.newzbin.com/DTD/2003/nzb}segment'):
+                    segments.append({
+                        'message_id': seg.text.strip(),
+                        'number': int(seg.get('number', 1)),
+                        'bytes': int(seg.get('bytes', 0))
+                    })
+            
+            # Sort segments by number
+            segments.sort(key=lambda x: x['number'])
+            
+            # Download segments
+            results = []
+            for segment in segments:
+                result = await self.download_segment(
+                    segment['message_id'],
+                    segment['number'],
+                    filename
+                )
+                if result:
+                    results.append(result)
+            
+            # Combine segment data
+            return b''.join(results) if results else None
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to process NZB file: {e}")
+            raise
+
 class RetryHandler:
     def __init__(self, max_retries: int = 3, initial_delay: float = 1.0):
         self.max_retries = max_retries
@@ -270,44 +312,3 @@ def categorize_error(e: Exception) -> str:
         return "DISK_ERROR"
     
     return "UNKNOWN_ERROR"
-
-    async def add_nzb_download(self, nzb_content: str, filename: str):
-        """Add a new NZB download job"""
-        try:
-            # Parse the NZB content
-            import xml.etree.ElementTree as ET
-            from io import StringIO
-            
-            tree = ET.parse(StringIO(nzb_content))
-            root = tree.getroot()
-            
-            # Extract segments
-            segments = []
-            for file_elem in root.findall('.//{http://www.newzbin.com/DTD/2003/nzb}file'):
-                for seg in file_elem.findall('.//{http://www.newzbin.com/DTD/2003/nzb}segment'):
-                    segments.append({
-                        'message_id': seg.text.strip(),
-                        'number': int(seg.get('number', 1)),
-                        'bytes': int(seg.get('bytes', 0))
-                    })
-            
-            # Sort segments by number
-            segments.sort(key=lambda x: x['number'])
-            
-            # Download segments
-            results = []
-            for segment in segments:
-                result = await self.download_segment(
-                    segment['message_id'],
-                    segment['number'],
-                    filename
-                )
-                if result:
-                    results.append(result)
-            
-            # Combine segment data
-            return b''.join(results) if results else None
-            
-        except Exception as e:
-            logger.error(f"❌ Failed to process NZB file: {e}")
-            raise
