@@ -217,7 +217,7 @@ class NZBService:
         # TODO: Implement manual yEnc decoding as final fallback
         raise NotImplementedError("Manual yEnc decoding not implemented")
 
-    async def add_nzb_download(self, nzb_content: str, filename: str):
+    async def add_nzb_download(self, nzb_content: str, filename: str, download_path: str):
         """Add a new NZB download job"""
         try:
             # Parse the NZB content
