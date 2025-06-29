@@ -208,7 +208,7 @@ class NZBService:
         
         # Fallback to manual decoding
         try:
-            return import_from_module('src.services.yenc_decoder', 'decode_yenc')(data)
+            return import_from_module('src.services.yenc_decoder', 'decode_yenc').decode_yenc(data)
         except Exception as e:
             logger.error(f"💥 Manual yEnc decode failed for {message_id}: {e}")
             return None
