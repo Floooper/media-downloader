@@ -1,3 +1,4 @@
+from importlib import import_module as import_from_module
 """NZB service for downloading from Usenet"""
 from typing import Optional, Dict, Any
 import nntplib
@@ -207,7 +208,7 @@ class NZBService:
         
         # Fallback to manual decoding
         try:
-            return self._manual_yenc_decode(data)
+            return import_from_module('src.services.yenc_decoder', 'decode_yenc')(data)
         except Exception as e:
             logger.error(f"💥 Manual yEnc decode failed for {message_id}: {e}")
             return None
