@@ -63,10 +63,10 @@ app.add_middleware(
     allow_credentials=False,  # Must be False when using allow_origins=["*"]
     allow_methods=["*"],
     allow_headers=["*"],
-app.include_router(status_router)
 )
 
 # Include all routers
+app.include_router(status_router)  # Include status router first
 app.include_router(downloads_router)
 app.include_router(queue_router)
 app.include_router(tags_router)
@@ -92,6 +92,7 @@ async def api_health_check():
             "tags": "running"
         }
     }
+
 @app.get("/api/system/info")
 async def get_system_info():
     """Get system information."""
@@ -195,6 +196,16 @@ async def nzb_file_compat():
     """Backwards compatibility route for NZB uploads"""
     return {"message": "NZB upload endpoint moved", "new_endpoint": "/api/downloads/nzb-file", "redirect": True}
 
+@app.get("/status")
+async def status_compat():
+    """Backwards compatibility route for /status -> /api/status"""
+    from .api.status import system_status
+    return await system_status()
+
+# Mount static files LAST to avoid interfering with API routes
+app.mount("/assets", StaticFiles(directory="dist/assets"), name="assets")
+app.mount("/", StaticFiles(directory="dist", html=True), name="static")
+
 if __name__ == "__main__":
     import uvicorn
     from .config import settings
@@ -211,13 +222,3 @@ if __name__ == "__main__":
         log_level="info",
         timeout_keep_alive=30
     )
-
-# Mount static files LAST to avoid interfering with API routes
-app.mount("/assets", StaticFiles(directory="dist/assets"), name="assets")
-app.mount("/", StaticFiles(directory="dist", html=True), name="static")
-
-@app.get("/status")
-async def status_compat():
-    """Backwards compatibility route for /status -> /api/status"""
-    from .api.status import system_status
-    return await system_status()
