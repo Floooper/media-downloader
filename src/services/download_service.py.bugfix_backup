@@ -1,0 +1,222 @@
+from typing import Optional, Dict, List
+from datetime import datetime
+from sqlalchemy.orm import Session
+from ..database import SessionLocal
+from ..models.download import Download, DownloadStatus, DownloadType
+from ..models.tables import DownloadTable
+
+class DownloadService:
+    def __init__(self):
+        # Remove in-memory storage, use database instead
+        pass
+
+    def _get_db(self) -> Session:
+        """Get database session"""
+        return SessionLocal()
+
+    def _download_table_to_model(self, download_table: DownloadTable) -> Download:
+        """Convert database table object to Pydantic model"""
+        return Download(
+            id=download_table.id,
+            name=download_table.name,
+            status=DownloadStatus(download_table.status),
+            progress=download_table.progress,
+            download_type=DownloadType(download_table.download_type),
+            download_path=download_table.download_path,
+            speed=download_table.speed,
+            eta=download_table.eta,
+            tags=[],  # TODO: Load tags from relationship
+            queued_at=download_table.queued_at,
+            created_at=download_table.created_at,
+            updated_at=download_table.updated_at
+        )
+
+    def _model_to_download_table(self, download: Download) -> DownloadTable:
+        """Convert Pydantic model to database table object"""
+        return DownloadTable(
+            id=download.id,
+            name=download.name,
+            status=download.status.value,
+            progress=download.progress,
+            download_type=download.download_type.value,
+            download_path=download.download_path,
+            speed=download.speed,
+            eta=download.eta,
+            queued_at=download.queued_at,
+            created_at=download.created_at,
+            updated_at=download.updated_at
+        )
+
+    async def add_torrent(self, magnet_link: str, download_path: str) -> Download:
+        """Add a torrent download"""
+        db = self._get_db()
+        try:
+            # Create new download record
+            download_table = DownloadTable(
+                name=f"Torrent {datetime.now().strftime('%H:%M:%S')}",
+                status=DownloadStatus.QUEUED.value,
+                progress=0.0,
+                download_type=DownloadType.TORRENT.value,
+                download_path=download_path or "/downloads",
+                speed=0.0,
+                eta="",
+                created_at=datetime.utcnow(),
+                updated_at=datetime.utcnow()
+            )
+            
+            db.add(download_table)
+            db.commit()
+            db.refresh(download_table)
+            
+            return self._download_table_to_model(download_table)
+        finally:
+            db.close()
+
+    async def add_nzb(self, nzb_content, download_path: str) -> Download:
+        """Add an NZB download"""
+        db = self._get_db()
+        try:
+            # Create new download record
+            download_table = DownloadTable(
+                name=f"NZB {datetime.now().strftime('%H:%M:%S')}",
+                status=DownloadStatus.QUEUED.value,
+                progress=0.0,
+                download_type=DownloadType.NZB.value,
+                download_path=download_path or "/downloads",
+                speed=0.0,
+                eta="",
+                created_at=datetime.utcnow(),
+                updated_at=datetime.utcnow()
+            )
+            
+            db.add(download_table)
+            db.commit()
+            db.refresh(download_table)
+            
+            return self._download_table_to_model(download_table)
+        finally:
+            db.close()
+
+    async def get_download(self, download_id: int) -> Optional[Download]:
+        """Get a download by ID"""
+        db = self._get_db()
+        try:
+            download_table = db.query(DownloadTable).filter(DownloadTable.id == download_id).first()
+            if download_table:
+                return self._download_table_to_model(download_table)
+            return None
+        finally:
+            db.close()
+
+    async def get_all_downloads(self) -> List[Download]:
+        """Get all downloads"""
+        db = self._get_db()
+        try:
+            download_tables = db.query(DownloadTable).all()
+            return [self._download_table_to_model(dt) for dt in download_tables]
+        finally:
+            db.close()
+
+    async def update_download(self, download: Download) -> Download:
+        """Update a download in the database"""
+        db = self._get_db()
+        try:
+            download_table = db.query(DownloadTable).filter(DownloadTable.id == download.id).first()
+            if download_table:
+                download_table.name = download.name
+                download_table.status = download.status.value
+                download_table.progress = download.progress
+                download_table.speed = download.speed
+                download_table.eta = download.eta
+                download_table.queued_at = download.queued_at
+                download_table.updated_at = datetime.utcnow()
+                
+                db.commit()
+                db.refresh(download_table)
+                return self._download_table_to_model(download_table)
+            return download
+        finally:
+            db.close()
+
+    async def delete_download(self, download_id: int) -> bool:
+        """Delete a download"""
+        db = self._get_db()
+        try:
+            download_table = db.query(DownloadTable).filter(DownloadTable.id == download_id).first()
+            if download_table:
+                db.delete(download_table)
+                db.commit()
+                return True
+            return False
+        finally:
+            db.close()
+
+    async def get_progress(self, download_id: int) -> Dict:
+        """Get download progress"""
+        download = await self.get_download(download_id)
+        if download:
+            return {
+                "id": download.id,
+                "progress": download.progress,
+                "status": download.status,
+                "speed": download.speed,
+                "eta": download.eta
+            }
+        raise Exception("Download not found")
+
+    async def set_file_priorities(self, download_id: int, priorities: Dict[int, int]) -> Dict:
+        """Set file priorities for a torrent"""
+        # This would integrate with actual torrent client
+        return {"message": f"File priorities set for download {download_id}"}
+
+    async def pause_download(self, download_id: int) -> bool:
+        """Pause a download"""
+        download = await self.get_download(download_id)
+        if download:
+            download.status = DownloadStatus.PAUSED
+            await self.update_download(download)
+            return True
+        return False
+
+    async def resume_download(self, download_id: int) -> bool:
+        """Resume a download"""
+        download = await self.get_download(download_id)
+        if download:
+            download.status = DownloadStatus.DOWNLOADING
+            await self.update_download(download)
+            return True
+        return False
+
+    async def add_magnet_download(self, magnet_link: str, download_path: str) -> Download:
+        """Add a magnet link download (alias for add_torrent)"""
+        return await self.add_torrent(magnet_link, download_path)
+    
+    async def add_torrent_file(self, file_path: str, download_path: str) -> Download:
+        """Add a torrent file download"""
+        db = self._get_db()
+        try:
+            # Create new download record
+            download_table = DownloadTable(
+                name=f"Torrent File {datetime.now().strftime('%H:%M:%S')}",
+                status=DownloadStatus.QUEUED.value,
+                progress=0.0,
+                download_type=DownloadType.TORRENT.value,
+                download_path=download_path or "/downloads",
+                speed=0.0,
+                eta="",
+                created_at=datetime.utcnow(),
+                updated_at=datetime.utcnow()
+            )
+            
+            db.add(download_table)
+            db.commit()
+            db.refresh(download_table)
+            
+            return self._download_table_to_model(download_table)
+        finally:
+            db.close()
+    
+    async def remove_download(self, download_id: int, delete_files: bool = False) -> bool:
+        """Remove a download (alias for delete_download)"""
+        # In a real implementation, you'd handle file deletion based on delete_files flag
+        return await self.delete_download(download_id)

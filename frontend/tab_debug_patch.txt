@@ -1,0 +1,40 @@
+              <Tabs.Tab 
+                value="dashboard" 
+                leftSection={<IconList size={16} />}
+                onClick={() => {
+                  console.log("🔄 Dashboard tab clicked directly");
+                  setActiveTab("dashboard");
+                }}
+              >
+                Dashboard
+              </Tabs.Tab>
+              <Tabs.Tab 
+                value="add" 
+                leftSection={<IconDownload size={16} />}
+                onClick={() => {
+                  console.log("🔄 Add tab clicked directly");
+                  setActiveTab("add");
+                }}
+              >
+                Add Download
+              </Tabs.Tab>
+              <Tabs.Tab 
+                value="queue" 
+                leftSection={<IconList size={16} />}
+                onClick={() => {
+                  console.log("🔄 Queue tab clicked directly");
+                  setActiveTab("queue");
+                }}
+              >
+                Queue ({downloads.length})
+              </Tabs.Tab>
+              <Tabs.Tab 
+                value="debug" 
+                leftSection={<IconBug size={16} />}
+                onClick={() => {
+                  console.log("🔄 Debug tab clicked directly");
+                  setActiveTab("debug");
+                }}
+              >
+                Debug
+              </Tabs.Tab>

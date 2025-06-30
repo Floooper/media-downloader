@@ -1,0 +1,350 @@
+import axios from 'axios';
+import { Download, DownloadCreate, MediaManagerType, Tag, UsenetConfig, SystemConfig, ConnectionTestResult, NZBDownloadDetails } from '../types/api';
+import logger from './logging';
+
+interface QueueStatus {
+    active_downloads: number;
+    queued_downloads: number;
+    paused_downloads: number;
+    max_concurrent: number;
+}
+
+const api = axios.create({
+    baseURL: '/api', // Use Vite proxy instead of direct backend connection
+    timeout: 10000, // 10 second timeout
+});
+
+// Add request interceptor for logging
+api.interceptors.request.use(
+    (config) => {
+        const method = config.method?.toUpperCase() || 'UNKNOWN';
+        const url = config.url || 'unknown';
+        
+        console.log(`🚀 API Request: ${method} ${url}`);
+        logger.logApiRequest(method, url, 'api-client');
+        
+        return config;
+    },
+    (error) => {
+        console.error('❌ API Request Error:', error);
+        logger.error(`API Request Failed: ${error.message}`, 'api-client', error);
+        return Promise.reject(error);
+    }
+);
+
+// Add response interceptor for error handling
+api.interceptors.response.use(
+    (response) => {
+        const method = response.config.method?.toUpperCase() || 'UNKNOWN';
+        const url = response.config.url || 'unknown';
+        const status = response.status;
+        
+        console.log(`✅ API Response: ${status} ${method} ${url}`);
+        logger.logApiResponse(method, url, status, 'api-client');
+        
+        return response;
+    },
+    (error) => {
+        const method = error.config?.method?.toUpperCase() || 'UNKNOWN';
+        const url = error.config?.url || 'unknown';
+        const status = error.response?.status;
+        
+        console.error('❌ API Response Error:', {
+            status,
+            statusText: error.response?.statusText,
+            url,
+            method,
+            data: error.response?.data,
+            message: error.message
+        });
+        
+        // Log the API error
+        logger.logApiError(method, url, error, 'api-client');
+        
+        // Enhance error message for better user feedback
+        if (error.response?.data?.error) {
+            error.message = error.response.data.error;
+        } else if (error.response?.data?.detail) {
+            error.message = error.response.data.detail;
+        } else if (error.code === 'ECONNABORTED') {
+            error.message = 'Request timeout - please try again';
+        } else if (error.code === 'ERR_NETWORK') {
+            error.message = 'Network error - please check your connection';
+        }
+        
+        return Promise.reject(error);
+    }
+);
+
+export const downloadService = {
+    getDownloads: async () => {
+        const response = await api.get<Download[]>('/downloads/');
+        return response.data;
+    },
+
+    getQueueStatus: async () => {
+        const response = await api.get<QueueStatus>('/queue/status');
+        return response.data;
+    },
+
+    createDownload: async (data: DownloadCreate) => {
+        const response = await api.post<Download>('/downloads/', data);
+        return response.data;
+    },
+
+    uploadNzb: async (file: File, downloadPath?: string) => {
+        const formData = new FormData();
+        formData.append('file', file);
+        if (downloadPath) {
+            formData.append('download_path', downloadPath);
+        }
+
+        const response = await api.post<Download>('/downloads/nzb-file', formData, {
+            headers: {
+                'Content-Type': 'multipart/form-data'
+            }
+        });
+        return response.data;
+    },
+
+    pauseDownload: async (downloadId: number) => {
+        const response = await api.post(`/queue/${downloadId}/pause`);
+        return response.data;
+    },
+
+    resumeDownload: async (downloadId: number) => {
+        const response = await api.post(`/queue/${downloadId}/resume`);
+        return response.data;
+    },
+
+    removeFromQueue: async (downloadId: number) => {
+        const response = await api.delete(`/queue/${downloadId}`);
+        return response.data;
+    },
+
+    reorderQueue: async (downloadId: number, newPosition: number) => {
+        const response = await api.post(`/queue/${downloadId}/position/${newPosition}`);
+        return response.data;
+    },
+    
+    // Torrent-specific operations
+    addTorrentMagnet: async (magnetLink: string, downloadPath: string) => {
+        const response = await api.post<Download>("/downloads/", {
+            url: magnetLink,
+            download_type: "torrent",
+            download_path: downloadPath
+        });
+        return response.data;
+    },
+
+    uploadTorrentFile: async (file: File, downloadPath?: string) => {
+        const formData = new FormData();
+        formData.append('file', file);
+        if (downloadPath) {
+            formData.append('download_path', downloadPath);
+        }
+
+        const response = await api.post<Download>('/downloads/torrent/file', formData, {
+            headers: {
+                'Content-Type': 'multipart/form-data'
+            }
+        });
+        return response.data;
+    },
+
+    setFilePriorities: async (downloadId: number, priorities: Record<number, number>) => {
+        const response = await api.post(`/downloads/${downloadId}/file-priorities`, priorities);
+        return response.data;
+    },
+
+    getNzbDetails: async (downloadId: number) => {
+        const response = await api.get<NZBDownloadDetails>(`/downloads/${downloadId}/nzb-details`);
+        return response.data;
+    },
+
+    getTorrentDetails: async (downloadId: number) => {
+        const response = await api.get<Download>(`/downloads/${downloadId}/details`);
+        return response.data;
+    },
+
+    setDownloadPriority: async (downloadId: number, priority: number) => {
+        const response = await api.post(`/downloads/${downloadId}/priority`, { priority });
+        return response.data;
+    },
+
+    // Missing methods that App.tsx is calling
+    addNzb: async (url: string, downloadPath: string) => {
+        const response = await api.post<Download>("/downloads/", {
+            url: url,
+            download_type: "nzb",
+            download_path: downloadPath
+        });
+        return response.data;
+    },
+
+    uploadNzbFile: async (file: File, downloadPath?: string) => {
+        const formData = new FormData();
+        formData.append("file", file);
+        if (downloadPath) {
+            formData.append("download_path", downloadPath);
+        }
+
+        const response = await api.post<Download>("/downloads/nzb-file", formData, {
+            headers: {
+                "Content-Type": "multipart/form-data"
+            }
+        });
+        return response.data;
+    },
+
+    deleteDownload: async (downloadId: number) => {
+        const response = await api.delete(`/downloads/${downloadId}`);
+        return response.data;
+    },
+
+    restartDownload: async (downloadId: number) => {
+        const response = await api.post(`/downloads/${downloadId}/restart`);
+        return response.data;
+    },
+};
+
+export const tagService = {
+    getTags: async () => {
+        const response = await api.get<Tag[]>('/tags/');
+        return response.data;
+    },
+
+    getTag: async (tagId: number) => {
+        const response = await api.get<Tag>(`/tags/${tagId}`);
+        return response.data;
+    },
+
+    createTag: async (tag: Omit<Tag, 'id' | 'created_at' | 'updated_at'>) => {
+        const response = await api.post<Tag>('/tags/', tag);
+        return response.data;
+    },
+
+    updateTag: async (tagId: number, tag: Partial<Omit<Tag, 'id' | 'created_at' | 'updated_at'>>) => {
+        const response = await api.put<Tag>(`/tags/${tagId}`, tag);
+        return response.data;
+    },
+
+    deleteTag: async (tagId: number) => {
+        const response = await api.delete(`/tags/${tagId}`);
+        return response.data;
+    },
+
+    validatePattern: async (pattern: string) => {
+        const response = await api.post('/tags/validate-pattern', null, {
+            params: { pattern }
+        });
+        return response.data;
+    },
+
+    testPattern: async (tagId: number, testString: string) => {
+        const response = await api.get(`/tags/test-pattern/${tagId}`, {
+            params: { test_string: testString }
+        });
+        return response.data;
+    },
+
+    // Download tag management
+    addTagToDownload: async (downloadId: number, tagId: number) => {
+        const response = await api.post(`/downloads/${downloadId}/tags/${tagId}`);
+        return response.data;
+    },
+
+    removeTagFromDownload: async (downloadId: number, tagId: number) => {
+        const response = await api.delete(`/downloads/${downloadId}/tags/${tagId}`);
+        return response.data;
+    },
+
+    autoAssignTags: async (downloadId: number) => {
+        const response = await api.post(`/downloads/${downloadId}/auto-tag`);
+        return response.data;
+    }
+};
+
+export const mediaManagerService = {
+    discoverManagers: async () => {
+        const response = await api.get('/media-managers/discover');
+        return response.data;
+    },
+
+    testConnection: async (managerType: MediaManagerType, config: any) => {
+        const response = await api.post(`/media-managers/${managerType}/test`, config);
+        return response.data;
+    },
+
+    getStatus: async (managerType: MediaManagerType) => {
+        const response = await api.get(`/media-managers/${managerType}/status`);
+        return response.data;
+    },
+
+    saveConfig: async (managerType: MediaManagerType, config: any) => {
+        const response = await api.post(`/media-managers/${managerType}/config`, config);
+        return response.data;
+    },
+
+    getConfig: async (managerType: MediaManagerType) => {
+        const response = await api.get(`/media-managers/${managerType}/config`);
+        return response.data;
+    },
+
+    getTags: async (managerType: MediaManagerType) => {
+        const response = await api.get(`/media-managers/${managerType}/tags/`);
+        return response.data;
+    },
+
+    triggerHealthCheck: async (managerType: MediaManagerType) => {
+        const response = await api.post(`/media-managers/${managerType}/health-check`);
+        return response.data;
+    },
+    getCategories: async (managerType: MediaManagerType) => {
+        const response = await api.get(`/media-managers/${managerType}/categories`);
+        return response.data;
+    },
+
+    getRootFolders: async (managerType: MediaManagerType) => {
+        const response = await api.get(`/media-managers/${managerType}/root-folders`);
+        return response.data;
+    },
+
+    getQualityProfiles: async (managerType: MediaManagerType) => {
+        const response = await api.get(`/media-managers/${managerType}/quality-profiles`);
+        return response.data;
+    },
+
+    registerDownloader: async (managerType: MediaManagerType, config: any) => {
+        const response = await api.post(`/media-managers/${managerType}/register`, config);
+        return response.data;
+    },
+
+    notifyComplete: async (managerType: MediaManagerType, path: string) => {
+        const response = await api.post(`/media-managers/${managerType}/notify-complete`, { path });
+        return response.data;
+    },
+
+};
+
+export const configService = {
+    getUsenetConfig: async () => {
+        const response = await api.get("/config/usenet");
+        return response.data;
+    },
+
+    updateUsenetConfig: async (config: any) => {
+        const response = await api.put("/config/usenet", config);
+        return response.data;
+    },
+
+    getSystemConfig: async () => {
+        const response = await api.get("/config/system");
+        return response.data;
+    },
+
+    testUsenetConnection: async (config: any) => {
+        const response = await api.post("/config/test-connection", config);
+        return response.data;
+    }
+};

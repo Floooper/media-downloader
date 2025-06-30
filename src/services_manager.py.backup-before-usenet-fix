@@ -1,10 +1,9 @@
 """
 Service Manager - Provides singleton instances of services
 """
-from typing import Dict, Any, Optional
 from .services.download_service import DownloadService
 from .services.queue_service import QueueManager
-from .services.tag_service import TagService 
+from .services.tag_service import TagService
 from .services.torrent_service import TorrentDownloader
 
 class ServicesManager:
@@ -49,36 +48,41 @@ class ServicesManager:
             self._torrent_downloader = TorrentDownloader()
         return self._torrent_downloader
 
-    def get_nzb_downloader(self):
-        """Get the singleton NZB downloader instance"""
-        if not hasattr(self, "_nzb_downloader"):
-            from .services.nzb_service import NZBService
-            from .config import settings
-            
-            config = {
-                "host": settings.USENET_SERVER,
-                "port": settings.USENET_PORT,
-                "ssl": settings.USENET_SSL,
-                "username": settings.USENET_USERNAME,
-                "password": settings.USENET_PASSWORD,
-                "max_connections": settings.USENET_MAX_CONNECTIONS,
-                "retention_days": settings.USENET_RETENTION_DAYS,
-                "download_rate_limit": settings.USENET_DOWNLOAD_RATE_LIMIT,
-                "max_retries": settings.USENET_MAX_RETRIES
-            }
-            
-            # Initialize NZB service with config dictionary
-            self._nzb_downloader = NZBService(config)
-            
-            # Log the configuration being used (mask password)
-            masked_password = "***" if settings.USENET_PASSWORD else "(empty)"
-            print(f"🔧 NZB downloader initialized with current settings:")
-            print(f"   Server: {settings.USENET_SERVER}:{settings.USENET_PORT}")
-            print(f"   SSL: {settings.USENET_SSL}")
-            print(f"   Username: {settings.USENET_USERNAME}")
-            print(f"   Password: {masked_password}")
-            
-        return self._nzb_downloader
-
-# Global singleton instance  
+# Global singleton instance
 services = ServicesManager()
+def get_nzb_downloader(self):
+    """Get the singleton NZB downloader instance"""
+    if not hasattr(self, '_nzb_downloader'):
+        from .services.nzb_service import NZBDownloader
+        from .config import settings
+        self._nzb_downloader = NZBDownloader(
+            usenet_server=settings.USENET_SERVER,
+            port=settings.USENET_PORT,
+            use_ssl=settings.USENET_SSL,
+            username=settings.USENET_USERNAME,
+            password=settings.USENET_PASSWORD,
+            max_connections=getattr(settings, 'USENET_MAX_CONNECTIONS', 10),
+            retention_days=getattr(settings, 'USENET_RETENTION_DAYS', 1500),
+            download_rate_limit=getattr(settings, 'USENET_DOWNLOAD_RATE_LIMIT', None),
+            max_retries=getattr(settings, 'USENET_MAX_RETRIES', 3)
+        )
+    return self._nzb_downloader
+    """Get the singleton NZB downloader instance"""
+    if not hasattr(self, '_nzb_downloader'):
+        from .services.nzb_service import NZBDownloader
+        from .config import settings
+        self._nzb_downloader = NZBDownloader(
+            usenet_server=settings.USENET_SERVER,
+            port=settings.USENET_PORT,
+            use_ssl=settings.USENET_SSL,
+            username=settings.USENET_USERNAME,
+            password=settings.USENET_PASSWORD,
+            max_connections=settings.USENET_MAX_CONNECTIONS,
+            retention_days=settings.USENET_RETENTION_DAYS,
+            download_rate_limit=settings.USENET_DOWNLOAD_RATE_LIMIT,
+            max_retries=settings.USENET_MAX_RETRIES
+        )
+    return self._nzb_downloader
+
+# Integration with global services instance
+ServicesManager.get_nzb_downloader = get_nzb_downloader

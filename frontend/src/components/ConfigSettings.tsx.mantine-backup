@@ -1,0 +1,303 @@
+import React, { useState, useEffect } from 'react';
+import { 
+    Card, 
+    Title, 
+    TextInput, 
+    NumberInput, 
+    Checkbox, 
+    Button, 
+    Group, 
+    Stack, 
+    Text, 
+    Alert,
+    Divider,
+    Tabs,
+    PasswordInput,
+    LoadingOverlay,
+    Notification
+} from '@mantine/core';
+import { IconSettings, IconServer, IconCheck, IconX, IconTestPipe } from '@tabler/icons-react';
+import { configService } from '../services/api';
+import { UsenetConfig, SystemConfig, ConnectionTestResult } from '../types/api';
+
+interface ConfigSettingsProps {
+    onConfigUpdate?: () => void;
+}
+
+export default function ConfigSettings({ onConfigUpdate }: ConfigSettingsProps) {
+    const [usenetConfig, setUsenetConfig] = useState<UsenetConfig>({
+        server: '',
+        port: 563,
+        use_ssl: true,
+        username: '',
+        password: '',
+        max_connections: 10,
+        retention_days: 1500,
+        download_rate_limit: undefined,
+        max_retries: 3
+    });
+    
+    const [systemConfig, setSystemConfig] = useState<SystemConfig | null>(null);
+    const [loading, setLoading] = useState(false);
+    const [testing, setTesting] = useState(false);
+    const [saveMessage, setSaveMessage] = useState<{ type: 'success' | 'error', message: string } | null>(null);
+    const [testResult, setTestResult] = useState<ConnectionTestResult | null>(null);
+
+    useEffect(() => {
+        loadConfigs();
+    }, []);
+
+    const loadConfigs = async () => {
+        setLoading(true);
+        try {
+            const [usenet, system] = await Promise.all([
+                downloadService.getUsenetConfig(),
+                downloadService.getSystemConfig()
+            ]);
+            setUsenetConfig(usenet);
+            setSystemConfig(system);
+        } catch (error) {
+            console.error('Failed to load configurations:', error);
+            setSaveMessage({ type: 'error', message: 'Failed to load configurations' });
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleUsenetConfigChange = (field: keyof UsenetConfig, value: any) => {
+        setUsenetConfig(prev => ({
+            ...prev,
+            [field]: value
+        }));
+    };
+
+    const saveUsenetConfig = async () => {
+        setLoading(true);
+        setSaveMessage(null);
+        try {
+            await downloadService.updateUsenetConfig(usenetConfig);
+            setSaveMessage({ type: 'success', message: 'Usenet configuration saved successfully!' });
+            if (onConfigUpdate) {
+                onConfigUpdate();
+            }
+        } catch (error) {
+            console.error('Failed to save usenet config:', error);
+            setSaveMessage({ type: 'error', message: 'Failed to save configuration' });
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const testConnection = async () => {
+        setTesting(true);
+        setTestResult(null);
+        try {
+            const result = await downloadService.testUsenetConnection(usenetConfig);
+            setTestResult(result);
+        } catch (error) {
+            console.error('Connection test failed:', error);
+            setTestResult({ success: false, message: 'Connection test failed' });
+        } finally {
+            setTesting(false);
+        }
+    };
+
+    return (
+        <div style={{ position: 'relative' }}>
+            <LoadingOverlay visible={loading} />
+            
+            <Stack spacing="lg">
+                <Title order={2}>Settings</Title>
+                
+                {saveMessage && (
+                    <Alert 
+                        color={saveMessage.type === 'success' ? 'green' : 'red'}
+                        icon={saveMessage.type === 'success' ? <IconCheck size={16} /> : <IconX size={16} />}
+                        onClose={() => setSaveMessage(null)}
+                        withCloseButton
+                    >
+                        {saveMessage.message}
+                    </Alert>
+                )}
+
+                <Tabs defaultValue="usenet">
+                    <Tabs.List>
+                        <Tabs.Tab value="usenet" leftSection={<IconServer size={16} />}>
+                            Usenet Configuration
+                        </Tabs.Tab>
+                        <Tabs.Tab value="system" leftSection={<IconSettings size={16} />}>
+                            System Settings
+                        </Tabs.Tab>
+                    </Tabs.List>
+
+                    <Tabs.Panel value="usenet" pt="md">
+                        <Card withBorder shadow="sm" p="lg">
+                            <Title order={3} mb="md">Usenet/NZB Server Configuration</Title>
+                            <Text size="sm" c="dimmed" mb="lg">
+                                Configure your Usenet provider settings to enable NZB downloads
+                            </Text>
+
+                            <Stack spacing="md">
+                                <TextInput
+                                    label="Server"
+                                    placeholder="news.usenet.com"
+                                    value={usenetConfig.server}
+                                    onChange={(e) => handleUsenetConfigChange('server', e.currentTarget.value)}
+                                    required
+                                />
+
+                                <Group grow>
+                                    <NumberInput
+                                        label="Port"
+                                        value={usenetConfig.port}
+                                        onChange={(value) => handleUsenetConfigChange('port', value || 563)}
+                                        min={1}
+                                        max={65535}
+                                    />
+                                    <Checkbox
+                                        label="Use SSL/TLS"
+                                        checked={usenetConfig.use_ssl}
+                                        onChange={(e) => handleUsenetConfigChange('use_ssl', e.currentTarget.checked)}
+                                        mt="xl"
+                                    />
+                                </Group>
+
+                                <Group grow>
+                                    <TextInput
+                                        label="Username"
+                                        value={usenetConfig.username}
+                                        onChange={(e) => handleUsenetConfigChange('username', e.currentTarget.value)}
+                                        required
+                                    />
+                                    <PasswordInput
+                                        label="Password"
+                                        value={usenetConfig.password}
+                                        onChange={(e) => handleUsenetConfigChange('password', e.currentTarget.value)}
+                                        required
+                                    />
+                                </Group>
+
+                                <Divider label="Advanced Settings" labelPosition="center" my="md" />
+
+                                <Group grow>
+                                    <NumberInput
+                                        label="Max Connections"
+                                        value={usenetConfig.max_connections}
+                                        onChange={(value) => handleUsenetConfigChange('max_connections', value || 10)}
+                                        min={1}
+                                        max={50}
+                                        description="Number of simultaneous connections to server"
+                                    />
+                                    <NumberInput
+                                        label="Retention Days"
+                                        value={usenetConfig.retention_days}
+                                        onChange={(value) => handleUsenetConfigChange('retention_days', value || 1500)}
+                                        min={1}
+                                        description="Server retention period in days"
+                                    />
+                                </Group>
+
+                                <Group grow>
+                                    <NumberInput
+                                        label="Download Rate Limit (KB/s)"
+                                        value={usenetConfig.download_rate_limit || ''}
+                                        onChange={(value) => handleUsenetConfigChange('download_rate_limit', value || undefined)}
+                                        min={0}
+                                        placeholder="Unlimited"
+                                        description="Leave empty for unlimited"
+                                    />
+                                    <NumberInput
+                                        label="Max Retries"
+                                        value={usenetConfig.max_retries}
+                                        onChange={(value) => handleUsenetConfigChange('max_retries', value || 3)}
+                                        min={0}
+                                        max={10}
+                                        description="Maximum retry attempts for failed segments"
+                                    />
+                                </Group>
+
+                                {testResult && (
+                                    <Alert 
+                                        color={testResult.success ? 'green' : 'red'}
+                                        icon={testResult.success ? <IconCheck size={16} /> : <IconX size={16} />}
+                                    >
+                                        {testResult.message}
+                                    </Alert>
+                                )}
+
+                                <Group justify="flex-end" mt="lg">
+                                    <Button 
+                                        variant="outline" 
+                                        leftSection={<IconTestPipe size={16} />}
+                                        onClick={testConnection}
+                                        loading={testing}
+                                        disabled={!usenetConfig.server || !usenetConfig.username || !usenetConfig.password}
+                                    >
+                                        Test Connection
+                                    </Button>
+                                    <Button 
+                                        onClick={saveUsenetConfig}
+                                        loading={loading}
+                                        disabled={!usenetConfig.server || !usenetConfig.username || !usenetConfig.password}
+                                    >
+                                        Save Configuration
+                                    </Button>
+                                </Group>
+                            </Stack>
+                        </Card>
+                    </Tabs.Panel>
+
+                    <Tabs.Panel value="system" pt="md">
+                        <Card withBorder shadow="sm" p="lg">
+                            <Title order={3} mb="md">System Configuration</Title>
+                            <Text size="sm" c="dimmed" mb="lg">
+                                System-wide settings and configuration
+                            </Text>
+
+                            {systemConfig && (
+                                <Stack spacing="md">
+                                    <TextInput
+                                        label="Default Download Path"
+                                        value={systemConfig.default_download_path}
+                                        readOnly
+                                        description="Directory where downloads are saved"
+                                    />
+                                    
+                                    <Group grow>
+                                        <NumberInput
+                                            label="Max Concurrent Downloads"
+                                            value={systemConfig.max_concurrent_downloads}
+                                            readOnly
+                                        />
+                                        <TextInput
+                                            label="Log Level"
+                                            value={systemConfig.log_level}
+                                            readOnly
+                                        />
+                                    </Group>
+
+                                    <Group grow>
+                                        <TextInput
+                                            label="API Host"
+                                            value={systemConfig.api_host}
+                                            readOnly
+                                        />
+                                        <NumberInput
+                                            label="API Port"
+                                            value={systemConfig.api_port}
+                                            readOnly
+                                        />
+                                    </Group>
+
+                                    <Text size="sm" c="dimmed">
+                                        System settings are read-only and can be modified through configuration files.
+                                    </Text>
+                                </Stack>
+                            )}
+                        </Card>
+                    </Tabs.Panel>
+                </Tabs>
+            </Stack>
+        </div>
+    );
+}

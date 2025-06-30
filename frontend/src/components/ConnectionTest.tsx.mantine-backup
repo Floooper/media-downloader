@@ -1,0 +1,133 @@
+import React, { useState } from 'react';
+import { Button, Card, Text, Alert, Group, Stack } from '@mantine/core';
+import { IconCheck, IconX, IconLoader } from '@tabler/icons-react';
+
+export function ConnectionTest() {
+  const [testing, setTesting] = useState(false);
+  const [results, setResults] = useState<{[key: string]: boolean | null}>({
+    api: null,
+    downloads: null,
+    tags: null,
+    addDownload: null
+  });
+
+  const runTests = async () => {
+    setTesting(true);
+    const newResults: {[key: string]: boolean | null} = {};
+
+    try {
+      // Test 1: API Health
+      console.log('Testing API health...');
+      const healthResponse = await fetch('/health');
+      newResults.api = healthResponse.ok;
+      
+      // Test 2: Downloads endpoint
+      console.log('Testing downloads endpoint...');
+      const downloadsResponse = await fetch('/api/downloads/');
+      newResults.downloads = downloadsResponse.ok;
+      
+      // Test 3: Tags endpoint
+      console.log('Testing tags endpoint...');
+      const tagsResponse = await fetch('/api/tags/');
+      newResults.tags = tagsResponse.ok;
+      
+      // Test 4: Add download
+      console.log('Testing add download...');
+      const addResponse = await fetch('/api/downloads/torrent', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          magnet_link: 'magnet:?xt=urn:btih:connectiontest123456789abcdef',
+          download_path: '/downloads/connection-test'
+        })
+      });
+      newResults.addDownload = addResponse.ok;
+
+    } catch (error) {
+      console.error('Test failed:', error);
+      Object.keys(newResults).forEach(key => {
+        if (newResults[key] === null) {
+          newResults[key] = false;
+        }
+      });
+    }
+
+    setResults(newResults);
+    setTesting(false);
+  };
+
+  const getStatusIcon = (status: boolean | null) => {
+    if (status === null) return <IconLoader size={16} />;
+    return status ? <IconCheck size={16} color="green" /> : <IconX size={16} color="red" />;
+  };
+
+  const getStatusText = (status: boolean | null) => {
+    if (status === null) return 'Not tested';
+    return status ? 'Pass' : 'Fail';
+  };
+
+  return (
+    <Card withBorder shadow="sm" p="lg">
+      <Text fw={700} mb="md">Connection Test</Text>
+      
+      <Stack gap="sm" mb="md">
+        <Group justify="space-between">
+          <Text size="sm">API Health Check</Text>
+          <Group gap="xs">
+            {getStatusIcon(results.api)}
+            <Text size="sm">{getStatusText(results.api)}</Text>
+          </Group>
+        </Group>
+        
+        <Group justify="space-between">
+          <Text size="sm">Downloads Endpoint</Text>
+          <Group gap="xs">
+            {getStatusIcon(results.downloads)}
+            <Text size="sm">{getStatusText(results.downloads)}</Text>
+          </Group>
+        </Group>
+        
+        <Group justify="space-between">
+          <Text size="sm">Tags Endpoint</Text>
+          <Group gap="xs">
+            {getStatusIcon(results.tags)}
+            <Text size="sm">{getStatusText(results.tags)}</Text>
+          </Group>
+        </Group>
+        
+        <Group justify="space-between">
+          <Text size="sm">Add Download Function</Text>
+          <Group gap="xs">
+            {getStatusIcon(results.addDownload)}
+            <Text size="sm">{getStatusText(results.addDownload)}</Text>
+          </Group>
+        </Group>
+      </Stack>
+      
+      <Button 
+        onClick={runTests} 
+        loading={testing}
+        fullWidth
+        variant="light"
+      >
+        {testing ? 'Running Tests...' : 'Run Connection Tests'}
+      </Button>
+      
+      {Object.values(results).some(r => r !== null) && (
+        <Alert 
+          color={Object.values(results).every(r => r === true) ? 'green' : 'orange'} 
+          mt="md"
+        >
+          {Object.values(results).every(r => r === true) 
+            ? '✅ All tests passed! Frontend and backend are properly connected.'
+            : '⚠️ Some tests failed. Check the browser console for details.'
+          }
+        </Alert>
+      )}
+    </Card>
+  );
+}
+
+export default ConnectionTest;

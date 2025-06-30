@@ -1,0 +1,800 @@
+import asyncio
+import os
+import logging
+import aiofiles
+import nntplib
+import ssl
+import socket
+import ssl
+import tempfile
+import xml.etree.ElementTree as ET
+from typing import Optional, Dict, List, Tuple
+from dataclasses import dataclass
+from datetime import datetime
+import threading
+import queue
+import time
+import re
+import concurrent.futures
+import hashlib
+import struct
+from threading import Lock, Semaphore
+from collections import defaultdict
+from ..database import SessionLocal
+from ..models.download import Download
+import binascii
+
+# Configure logging for production
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+try:
+    import pynzb
+    HAS_PYNZB = True
+    logger.info("✅ pynzb available for NZB parsing")
+except ImportError:
+    HAS_PYNZB = False
+    logger.warning("⚠️ pynzb not available - NZB parsing will be limited")
+
+try:
+    import sabyenc3 as yenc
+    HAS_YENC = True
+    logger.info("✅ sabyenc3 available for yEnc decoding")
+except ImportError:
+    try:
+        import yenc
+        HAS_YENC = True
+        logger.info("✅ yenc available for yEnc decoding")
+    except ImportError:
+        HAS_YENC = False
+        logger.warning("⚠️ yenc not available - will use manual decoding")
+
+@dataclass
+class NZBFile:
+    subject: str
+    groups: List[str]
+    segments: List[Dict]
+    total_bytes: int = 0
+    downloaded_bytes: int = 0
+    priority: int = 0
+    paused: bool = False
+
+@dataclass
+class NZBSegment:
+    number: int
+    message_id: str
+    bytes: int
+
+@dataclass
+class SegmentResult:
+    """Result of a segment download attempt"""
+    segment_number: int
+    message_id: str
+    data: bytes
+    success: bool
+    error: Optional[str] = None
+    size: int = 0
+    checksum: Optional[str] = None
+    retry_count: int = 0
+
+class NZBDownloader:
+    def __init__(self, usenet_server: str, port: int, use_ssl: bool, username: str, password: str, 
+                 max_connections: int = 10, retention_days: int = 1500, 
+                 download_rate_limit: Optional[int] = None,
+                 max_retries: int = 3):
+        # Store original parameters
+        self.server = usenet_server
+        self.port = port
+        self.use_ssl = use_ssl
+        self.username = username
+        self.password = password
+        self.retention_days = retention_days
+        self.download_rate_limit = download_rate_limit
+        self.max_retries = max_retries
+        
+        # FORCE PRODUCTION MODE - NO MOCK MODE ALLOWED
+        self.real_mode = True
+        
+        # Enhanced threading configuration with up to 200 threads
+        self.max_connections = min(max_connections, 200)
+        if max_connections > 200:
+            logger.warning(f"⚠️ Max connections capped at 200 (requested: {max_connections})")
+        
+        self.connection_pool = []
+        self.connection_lock = Lock()
+        self.download_semaphore = Semaphore(self.max_connections)
+        self.segment_cache = defaultdict(dict)
+        
+        # Track active downloads
+        self.active_downloads: Dict[str, Dict] = {}
+        self.download_progress: Dict[str, float] = {}
+        self.download_threads: Dict[str, threading.Thread] = {}
+        
+        # Statistics tracking
+        self.stats = {
+            'segments_downloaded': 0,
+            'segments_failed': 0,
+            'bytes_downloaded': 0,
+            'retry_attempts': 0,
+            'validation_failures': 0
+        }
+        
+        logger.info(f"🔧 NZB Downloader initialized: {usenet_server}:{port} (SSL: {use_ssl})")
+        logger.info(f"🧵 Max concurrent connections: {self.max_connections}")
+        logger.info("🚀 PRODUCTION MODE ENABLED - Real downloads only")
+        
+        if self.username and self.password:
+            logger.info("✅ Usenet credentials configured - Real downloads enabled")
+        else:
+            logger.error("❌ Missing Usenet credentials - Downloads will fail!")
+
+    @property
+    def mock_mode(self) -> bool:
+        """Always return False - no mock mode in production"""
+        return False
+
+    def _create_nntp_connection(self) -> nntplib.NNTP:
+        """Create a new NNTP connection"""
+        if self.use_ssl:
+            return nntplib.NNTP_SSL(
+                self.server, 
+                self.port,
+                user=self.username,
+                password=self.password,
+                timeout=30
+            )
+        else:
+            return nntplib.NNTP(
+                self.server, 
+                self.port,
+                user=self.username,
+                password=self.password,
+                timeout=30
+            )
+
+    async def test_connection(self) -> Dict[str, any]:
+        """Test the NNTP connection"""
+        def test_conn():
+            try:
+                server = self._create_nntp_connection()
+                response, count, first, last, name = server.group('alt.binaries.test')
+                server.quit()
+                return {
+                    "status": "success",
+                    "message": f"Connected to {self.server}:{self.port}",
+                    "test_group": name.decode() if isinstance(name, bytes) else name,
+                    "articles_available": count
+                }
+            except Exception as e:
+                return {
+                    "status": "error", 
+                    "message": f"Connection failed: {str(e)}"
+                }
+        
+        # Run in thread pool to avoid blocking
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, test_conn)
+
+    def _extract_filename_from_subject(self, subject: str) -> str:
+        """Extract a clean filename from the NZB subject line"""
+        try:
+            # Common patterns for extracting filenames from subjects
+            patterns = [
+                r'"([^"]+)"',  # Text in quotes
+                r'\[(\d+/\d+)\]\s*-\s*"([^"]+)"',  # [01/10] - "filename"
+                r'(\S+\.\w{2,4})',  # Simple filename.ext
+                r'-\s*([^-]+\.\w{2,4})',  # - filename.ext
+            ]
+            
+            for pattern in patterns:
+                match = re.search(pattern, subject)
+                if match:
+                    if len(match.groups()) > 1:
+                        filename = match.group(-1)  # Take the last group
+                    else:
+                        filename = match.group(1)
+                    
+                    # Clean up the filename
+                    filename = re.sub(r'[^\w\s.-]', '', filename)
+                    filename = re.sub(r'\s+', ' ', filename).strip()
+                    
+                    if filename and len(filename) > 3:
+                        return filename
+            
+            # Fallback - use the subject itself, cleaned up
+            cleaned = re.sub(r'[^\w\s.-]', '', subject)
+            cleaned = re.sub(r'\s+', '_', cleaned).strip()
+            return cleaned[:100] if cleaned else "unknown_file"
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to extract filename from subject '{subject}': {e}")
+            return "unknown_file"
+
+    def _parse_nzb(self, nzb_content: str) -> List[NZBFile]:
+        """Parse NZB content and return list of files"""
+        try:
+            if HAS_PYNZB:
+                # Use pynzb for parsing
+                nzb = pynzb.nzb_parser.parse(nzb_content)
+                nzb_files = []
+                
+                for nzb_file in nzb:
+                    segments = []
+                    total_bytes = 0
+                    
+                    for segment in nzb_file.segments:
+                        segments.append({
+                            'number': segment.number,
+                            'message_id': segment.message_id,
+                            'bytes': segment.bytes
+                        })
+                        total_bytes += segment.bytes
+                    
+                    nzb_files.append(NZBFile(
+                        subject=nzb_file.subject,
+                        groups=nzb_file.groups,
+                        segments=segments,
+                        total_bytes=total_bytes
+                    ))
+                
+                return nzb_files
+            else:
+                # Basic XML parsing fallback
+                return self._parse_nzb_xml(nzb_content)
+                
+        except Exception as e:
+            logger.error(f"❌ Failed to parse NZB: {e}")
+            return []
+
+    def _parse_nzb_xml(self, nzb_content: str) -> List[NZBFile]:
+        """Fallback XML parsing for NZB files"""
+        try:
+            root = ET.fromstring(nzb_content)
+            nzb_files = []
+            
+            for file_elem in root.findall('.//{http://www.newzbin.com/DTD/2003/nzb}file'):
+                subject = file_elem.get('subject', 'Unknown')
+                groups = [g.text for g in file_elem.findall('.//{http://www.newzbin.com/DTD/2003/nzb}group')]
+                
+                segments = []
+                total_bytes = 0
+                
+                for segment_elem in file_elem.findall('.//{http://www.newzbin.com/DTD/2003/nzb}segment'):
+                    segment_bytes = int(segment_elem.get('bytes', 0))
+                    segments.append({
+                        'number': int(segment_elem.get('number', 0)),
+                        'message_id': segment_elem.text.strip(),
+                        'bytes': segment_bytes
+                    })
+                    total_bytes += segment_bytes
+                
+                if segments:
+                    nzb_files.append(NZBFile(
+                        subject=subject,
+                        groups=groups,
+                        segments=segments,
+                        total_bytes=total_bytes
+                    ))
+            
+            return nzb_files
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to parse NZB XML: {e}")
+            return []
+
+    def _get_connection(self) -> Optional[nntplib.NNTP]:
+        """Get an NNTP connection from the pool or create a new one"""
+        with self.connection_lock:
+            if self.connection_pool:
+                connection = self.connection_pool.pop()
+                logger.debug(f"♻️ Reusing pooled NNTP connection")
+                return connection
+        
+        try:
+            connection = self._create_nntp_connection()
+            logger.debug(f"✅ Created new NNTP connection to {self.server}:{self.port}")
+            return connection
+        except Exception as e:
+            logger.error(f"❌ Failed to create NNTP connection: {e}")
+            return None
+    
+    def _return_connection(self, connection: nntplib.NNTP):
+        """Return connection to pool"""
+        if connection:
+            with self.connection_lock:
+                if len(self.connection_pool) < self.max_connections:
+                    self.connection_pool.append(connection)
+                    logger.debug(f"♻️ Returned connection to pool (pool size: {len(self.connection_pool)})")
+                else:
+                    try:
+                        connection.quit()
+                        logger.debug("🔌 Closed excess connection")
+                    except:
+                        pass
+    
+    def _return_connection_conditional(self, connection: nntplib.NNTP, return_connection: bool):
+        """Return connection to pool only if it should be returned"""
+        if return_connection:
+            self._return_connection(connection)
+        elif connection:
+            try:
+                connection.quit()
+            except Exception:
+                pass
+
+    def _validate_segment(self, segment_data: bytes, segment_info: Dict) -> Tuple[bool, str]:
+        """Validate downloaded segment data"""
+        if not segment_data:
+            return False, "Empty segment data"
+        
+        if len(segment_data) < 10:
+            return False, f"Segment too small: {len(segment_data)} bytes"
+        
+        try:
+            segment_str = segment_data.decode('ascii', errors='ignore')
+            
+            if '=ybegin' not in segment_str:
+                return False, "Missing yEnc begin marker"
+            
+            if '=ypart' in segment_str:
+                part_match = re.search(r'=ypart begin=(\d+) end=(\d+)', segment_str)
+                if part_match:
+                    begin_pos = int(part_match.group(1))
+                    end_pos = int(part_match.group(2))
+                    expected_size = end_pos - begin_pos + 1
+                    
+                    if expected_size <= 0 or expected_size > 1024 * 1024 * 10:
+                        return False, f"Invalid segment size: {expected_size}"
+            
+            if '=yend' not in segment_str:
+                return False, "Missing yEnc end marker"
+            
+            return True, "Valid yEnc segment"
+            
+        except Exception as e:
+            return False, f"Validation error: {e}"
+    def _download_segment_with_validation(self, segment_info: Dict, group: str, max_retries: int = 3) -> SegmentResult:
+        """Download and validate a single segment with retry logic"""
+        message_id = segment_info['message_id']
+        
+        segment_number = segment_info.get('number', 0)
+        
+        result = SegmentResult(
+            segment_number=segment_number,
+            message_id=message_id,
+            data=b'',
+            success=False
+        )
+        
+        # Skip segments without message_id
+        if not message_id:
+            result.error = "Missing message_id"
+            logger.warning(f"⚠️ Skipping segment {segment_number}: No message_id")
+            return result
+        segment_number = segment_info.get('number', 0)
+        
+        result = SegmentResult(
+            segment_number=segment_number,
+            message_id=message_id,
+            data=b'',
+            success=False
+        )
+        
+        for retry in range(max_retries + 1):
+            with self.download_semaphore:
+                connection = self._get_connection()
+                if not connection:
+                    result.error = "Failed to get NNTP connection"
+                    logger.error(f"❌ No NNTP connection available for segment {segment_number}")
+                    continue
+                
+                try:
+                    connection.group(group)
+                    logger.debug(f"📥 Downloading segment {segment_number} (attempt {retry + 1}/{max_retries + 1}): {message_id}")
+                    resp, info = connection.article(f"<{message_id}>")
+                    
+                    body_start = False
+                    body_lines = []
+                    for line in info:
+                        if body_start:
+                            body_lines.append(line)
+                        elif line == b'':
+                            body_start = True
+                    
+                    raw_data = b'\r\n'.join(body_lines)
+                    result.size = len(raw_data)
+                    
+                    logger.debug(f"📄 Retrieved segment {segment_number}: {len(raw_data)} bytes raw")
+                    
+                    is_valid, validation_msg = self._validate_segment(raw_data, segment_info)
+                    if not is_valid:
+                        result.error = f"Validation failed: {validation_msg}"
+                        logger.warning(f"⚠️ Segment {segment_number} validation failed: {validation_msg}")
+                        self.stats['validation_failures'] += 1
+                        if retry < max_retries:
+                            continue
+                        else:
+                            break
+                    
+                    decoded_data = self._decode_yenc_data(raw_data)
+                    if decoded_data:
+                        result.data = decoded_data
+                        result.success = True
+                        result.checksum = hashlib.md5(decoded_data).hexdigest()
+                        
+                        self.stats['segments_downloaded'] += 1
+                        self.stats['bytes_downloaded'] += len(decoded_data)
+                        
+                        logger.debug(f"✅ Successfully downloaded segment {segment_number}: {len(decoded_data)} bytes (checksum: {result.checksum[:8]})")
+                        break
+                    else:
+                        result.error = "Failed to decode yEnc data"
+                        logger.warning(f"⚠️ Failed to decode segment {segment_number}")
+                        
+                except nntplib.NNTPTemporaryError as e:
+                    result.error = f"Temporary NNTP error: {e}"
+                    logger.warning(f"⚠️ Temporary error downloading segment {segment_number}: {e}")
+                    if retry < max_retries:
+                        time.sleep(min(retry + 1, 5))
+                        continue
+                except nntplib.NNTPPermanentError as e:
+                    result.error = f"Permanent NNTP error: {e}"
+                    logger.error(f"❌ Permanent error downloading segment {segment_number}: {e}")
+                    break
+                except Exception as e:
+                    result.error = f"Unexpected error: {e}"
+                    logger.error(f"❌ Unexpected error downloading segment {segment_number}: {e}")
+                    if retry < max_retries:
+                        continue
+                finally:
+                    self._return_connection(connection)
+                    
+                result.retry_count = retry
+                if result.success:
+                    break
+        
+        if not result.success:
+            self.stats['segments_failed'] += 1
+            if result.retry_count > 0:
+                self.stats['retry_attempts'] += result.retry_count
+            logger.error(f"❌ Failed to download segment {segment_number} after {result.retry_count + 1} attempts: {result.error}")
+        
+        return result
+
+    def _decode_yenc_data(self, raw_data: bytes) -> Optional[bytes]:
+        """Decode yEnc data with multiple fallback methods - DEBUG MODE"""
+        try:
+            logger.debug(f"🔍 Raw data length: {len(raw_data)} bytes")
+            logger.debug(f"🔍 Raw data preview (first 200 chars): {raw_data[:200]}")
+            
+            if HAS_YENC:
+                try:
+                    if hasattr(yenc, 'decode_string'):
+                        decoded_data, _ = yenc.decode_string(raw_data)
+                        logger.debug(f"✅ yEnc decoded using sabyenc3: {len(decoded_data)} bytes")
+                        return decoded_data
+                    elif hasattr(yenc, 'decode'):
+                        decoded_data = yenc.decode(raw_data)
+                        logger.debug(f"✅ yEnc decoded using yenc: {len(decoded_data)} bytes")
+                        return decoded_data
+                except Exception as e:
+                    logger.debug(f"⚠️ yEnc decode failed, using manual method: {e}")
+            
+            decoded_data = self._manual_yenc_decode(raw_data)
+            if decoded_data:
+                logger.debug(f"✅ Manual yEnc decode successful: {len(decoded_data)} bytes")
+            else:
+                logger.debug(f"❌ Manual yEnc decode also failed")
+            return decoded_data
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to decode yEnc data: {e}")
+            return None
+
+    def _manual_yenc_decode(self, data: bytes) -> bytes:
+        """Enhanced manual yEnc decoding"""
+        try:
+            lines = data.split(b'\r\n')
+            decoded_parts = []
+            
+            in_yenc_data = False
+            
+            for line in lines:
+                try:
+                    line_str = line.decode('ascii', errors='ignore')
+                except:
+                    continue
+                
+                if line_str.startswith('=ybegin'):
+                    in_yenc_data = True
+                    continue
+                elif line_str.startswith('=yend'):
+                    break
+                elif line_str.startswith('=y') or not in_yenc_data:
+                    continue
+                
+                decoded_line = []
+                i = 0
+                while i < len(line):
+                    byte_val = line[i]
+                    
+                    if byte_val == ord('='):
+                        if i + 1 < len(line):
+                            next_byte = line[i + 1]
+                            decoded_byte = (next_byte - 64) % 256
+                            decoded_line.append((decoded_byte - 42) % 256)
+                            i += 2
+                        else:
+                            i += 1
+                    else:
+                        decoded_line.append((byte_val - 42) % 256)
+                        i += 1
+                
+                if decoded_line:
+                    decoded_parts.append(bytes(decoded_line))
+            
+            result = b''.join(decoded_parts)
+            logger.debug(f"🔧 Manual yEnc decode completed: {len(result)} bytes")
+            return result
+            
+        except Exception as e:
+            logger.error(f"❌ Manual yEnc decode failed: {e}")
+            return b''
+
+    def _download_nzb_real_concurrent(self, download_id: str, nzb_files: List[NZBFile], download_path: str):
+        """Download NZB files using concurrent segment downloads - PRODUCTION MODE ONLY"""
+        try:
+            logger.info(f"🚀 Starting PRODUCTION NZB download {download_id} with max {self.max_connections} threads")
+            
+            os.makedirs(download_path, exist_ok=True)
+            
+            total_files = len(nzb_files)
+            total_segments = sum(len(f.segments) for f in nzb_files)
+            logger.info(f"📊 Download stats: {total_files} files, {total_segments} total segments")
+            
+            for file_idx, nzb_file in enumerate(nzb_files):
+                if download_id not in self.active_downloads:
+                    logger.info(f"❌ Download {download_id} was cancelled")
+                    return
+                
+                clean_filename = self._extract_filename_from_subject(nzb_file.subject)
+                logger.info(f"📁 Downloading file {file_idx + 1}/{total_files}: {clean_filename}")
+                logger.info(f"🧩 File has {len(nzb_file.segments)} segments")
+                
+                segments_downloaded = 0
+                
+                with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_connections) as executor:
+                    future_to_segment = {}
+                    for seg_idx, segment in enumerate(nzb_file.segments):
+                        group = nzb_file.groups[0] if nzb_file.groups else 'alt.binaries.misc'
+                        
+                        future = executor.submit(
+                            self._download_segment_with_validation,
+                            segment,
+                            group
+                        )
+                        future_to_segment[future] = (seg_idx, segment)
+                    
+                    segment_results = {}
+                    for future in concurrent.futures.as_completed(future_to_segment):
+                        seg_idx, segment = future_to_segment[future]
+                        try:
+                            result = future.result()
+                            segment_results[seg_idx] = result
+                            
+                            if result.success:
+                                segments_downloaded += 1
+                                
+                                if segments_downloaded % 10 == 0:
+                                    progress = (segments_downloaded / len(nzb_file.segments)) * 100
+                                    logger.info(f"📊 File progress: {progress:.1f}% ({segments_downloaded}/{len(nzb_file.segments)} segments)")
+                            
+                        except Exception as e:
+                            logger.error(f"❌ Future error for segment {seg_idx}: {e}")
+                
+                if segments_downloaded > 0:
+                    success = self._assemble_file_from_segments(
+                        segment_results, clean_filename, download_path
+                    )
+                    if success:
+                        logger.info(f"✅ Successfully assembled file: {clean_filename}")
+                    else:
+                        logger.error(f"❌ Failed to assemble file: {clean_filename}")
+                else:
+                    logger.error(f"❌ No segments downloaded for file: {clean_filename}")
+                
+                file_progress = ((file_idx + 1) / total_files) * 100
+                self.active_downloads[download_id]["progress"] = file_progress
+                logger.info(f"📈 Overall progress: {file_progress:.1f}% ({file_idx + 1}/{total_files} files)")
+            
+            logger.info(f"📊 Download {download_id} statistics:")
+            logger.info(f"   Segments downloaded: {self.stats['segments_downloaded']}")
+            logger.info(f"   Segments failed: {self.stats['segments_failed']}")
+            logger.info(f"   Bytes downloaded: {self.stats['bytes_downloaded']:,}")
+            logger.info(f"   Retry attempts: {self.stats['retry_attempts']}")
+            logger.info(f"   Validation failures: {self.stats['validation_failures']}")
+            
+            self.active_downloads[download_id]["status"] = "completed"
+            self.active_downloads[download_id]["progress"] = 100.0
+            logger.info(f"✅ NZB download {download_id} completed")
+            
+        except Exception as e:
+            logger.error(f"❌ Fatal error in concurrent download {download_id}: {e}")
+            self.active_downloads[download_id]["status"] = "failed"
+
+    def _assemble_file_from_segments(self, segment_results: Dict[int, SegmentResult], filename: str, download_path: str) -> bool:
+        """Assemble a file from downloaded and validated segments"""
+        try:
+            temp_file_path = os.path.join(download_path, f".{filename}.tmp")
+            final_file_path = os.path.join(download_path, filename)
+            
+            successful_segments = []
+            for seg_idx in sorted(segment_results.keys()):
+                result = segment_results[seg_idx]
+                if result.success and result.data:
+                    successful_segments.append(result)
+            
+            if not successful_segments:
+                logger.error(f"❌ No successful segments to assemble for {filename}")
+                return False
+            
+            logger.info(f"🔧 Assembling {len(successful_segments)} segments for {filename}")
+            
+            with open(temp_file_path, 'wb') as f:
+                total_bytes_written = 0
+                for result in successful_segments:
+                    f.write(result.data)
+                    total_bytes_written += len(result.data)
+                
+                logger.debug(f"📝 Wrote {total_bytes_written:,} bytes to {filename}")
+            
+            if os.path.exists(temp_file_path) and os.path.getsize(temp_file_path) > 0:
+                counter = 1
+                original_final_path = final_file_path
+                while os.path.exists(final_file_path):
+                    name, ext = os.path.splitext(original_final_path)
+                    final_file_path = f"{name}_{counter}{ext}"
+                    counter += 1
+                
+                os.rename(temp_file_path, final_file_path)
+                file_size = os.path.getsize(final_file_path)
+                logger.info(f"✅ File assembled successfully: {final_file_path} ({file_size:,} bytes)")
+                return True
+            else:
+                logger.error(f"❌ Temporary file is empty or doesn't exist: {temp_file_path}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"❌ Failed to assemble file {filename}: {e}")
+            return False
+
+    def _download_nzb_real(self, download_id: str, nzb_files: List[NZBFile], download_path: str):
+        """Download NZB files using real NNTP connection - delegate to concurrent version"""
+        logger.info(f"🚀 Starting real NZB download {download_id}")
+        self._download_nzb_real_concurrent(download_id, nzb_files, download_path)
+
+    async def add_nzb_download(self, nzb_content: str, download_id: str, download_path: str, filename: str = None) -> bool:
+        """Add an NZB download - PRODUCTION MODE ONLY"""
+        try:
+            logger.info(f"🚀 Starting NZB download {download_id} (PRODUCTION MODE)")
+            
+            nzb_name = filename
+            if not nzb_name:
+                nzb_files = self._parse_nzb(nzb_content)
+                if nzb_files:
+                    nzb_name = self._extract_filename_from_subject(nzb_files[0].subject)
+            
+            # Parse NZB content for real download
+            nzb_files = self._parse_nzb(nzb_content)
+            if not nzb_files:
+                logger.error(f"❌ No files found in NZB for download {download_id}")
+                return False
+            
+            logger.info(f"📋 Found {len(nzb_files)} files in NZB")
+            
+            # Add to active downloads
+            self.active_downloads[download_id] = {
+                "status": "downloading",
+                "progress": 0.0,
+                "download_path": download_path,
+                "start_time": datetime.now(),
+            }
+            
+            # Start download in background thread
+            download_thread = threading.Thread(
+                target=self._download_nzb_real,
+                args=(download_id, nzb_files, download_path)
+            )
+            
+            self.download_threads[download_id] = download_thread
+            download_thread.start()
+            
+            logger.info(f"✅ Started NZB download: {download_id}")
+            
+            # Auto-tagging will be handled by the calling service
+            try:
+                from ..services_manager import services
+                tag_service = services.get_tag_service()
+                if hasattr(tag_service, 'auto_assign_tags'):
+                    db = SessionLocal()
+                    try:
+                        download_obj = db.query(Download).filter(Download.id == download_id).first()
+                        if download_obj:
+                            tag_service.auto_assign_tags(download_obj)
+                    finally:
+                        db.close()
+            except Exception as e:
+                logger.warning(f"Auto-tagging failed: {e}")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to add NZB download {download_id}: {e}")
+            return False
+
+    async def pause_download(self, download_id: str) -> bool:
+        """Pause a download"""
+        if download_id in self.active_downloads:
+            self.active_downloads[download_id]["status"] = "paused"
+            return True
+        return False
+
+    async def resume_download(self, download_id: str) -> bool:
+        """Resume a paused download"""
+        if download_id in self.active_downloads:
+            self.active_downloads[download_id]["status"] = "downloading"
+            return True
+        return False
+
+    async def cancel_download(self, download_id: str) -> bool:
+        """Cancel a download"""
+        try:
+            if download_id in self.active_downloads:
+                del self.active_downloads[download_id]
+            
+            if download_id in self.download_threads:
+                # Note: Python threads can't be forcibly killed, they need to check cancellation
+                del self.download_threads[download_id]
+            
+            return True
+        except Exception as e:
+            logger.error(f"❌ Failed to cancel download {download_id}: {e}")
+            return False
+
+    async def get_download_status(self, download_id: str) -> Optional[Dict]:
+        """Get the status of a download"""
+        return self.active_downloads.get(download_id)
+
+    async def get_system_info(self) -> Dict:
+        """Get system information about the downloader"""
+        total_downloads = len(self.active_downloads)
+        active_downloads = len([d for d in self.active_downloads.values() if d["status"] == "downloading"])
+        paused_downloads = len([d for d in self.active_downloads.values() if d["status"] == "paused"])
+        completed_downloads = len([d for d in self.active_downloads.values() if d["status"] == "completed"])
+        
+        return {
+            "total_downloads": total_downloads,
+            "active_downloads": active_downloads,
+            "paused_downloads": paused_downloads,
+            "completed_downloads": completed_downloads,
+            "server": self.server,
+            "mock_mode": self.mock_mode,  # Always False
+            "max_connections": self.max_connections,
+            "production_mode": True,
+            "stats": self.stats
+        }
+
+    async def _update_database_progress(self, download_id: str, progress: float, status: str = None):
+        """Update the database with current progress"""
+        try:
+            from ..services_manager import services
+            download_service = services.get_download_service()
+            
+            download = await download_service.get_download(download_id)
+            if download:
+                await download_service.update_download_progress(download_id, progress, status)
+        except Exception as e:
+            logger.debug(f"Failed to update database progress: {e}")

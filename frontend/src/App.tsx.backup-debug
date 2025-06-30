@@ -1,0 +1,544 @@
+import React, { useState, useEffect } from 'react';
+import { MantineProvider, Container, Group, Title, Button, Tabs, Card, Text, Grid, Alert, Badge, Progress, ActionIcon, Modal, TextInput, Textarea, ColorInput, Select } from '@mantine/core';
+import { IconRefresh, IconDownload, IconList, IconBug, IconPlayerPause, IconPlayerPlay, IconTrash, IconReload, IconTag, IconPlus, IconEdit } from '@tabler/icons-react';
+import ConnectionTest from './components/ConnectionTest';
+
+// Import types and services
+import { Download } from './types/api';
+import { downloadService, tagService } from './services/api';
+
+// Types for tags
+interface Tag {
+  id: number;
+  name: string;
+  color: string;
+  destination_folder?: string;
+  auto_assign_pattern?: string;
+  description?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+// Enhanced Download Form Component
+function EnhancedDownloadForm({ onDownloadAdded, tags }: { onDownloadAdded: () => void, tags: Tag[] }) {
+  const [formData, setFormData] = useState({
+    magnetLink: '',
+    downloadPath: '/downloads',
+    downloadType: 'torrent',
+    selectedTags: [] as number[]
+  });
+  const [submitting, setSubmitting] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!formData.magnetLink.trim()) return;
+
+    setSubmitting(true);
+    try {
+      console.log('🚀 Adding download:', formData);
+      
+      // Set download path based on selected tag if available
+      let downloadPath = formData.downloadPath;
+      if (formData.selectedTags.length > 0) {
+        const selectedTag = tags.find(t => t.id === formData.selectedTags[0]);
+        if (selectedTag?.destination_folder) {
+          downloadPath = selectedTag.destination_folder;
+        }
+      }
+      
+      let result;
+      if (formData.downloadType === 'torrent') {
+        result = await downloadService.addTorrentMagnet(formData.magnetLink, downloadPath);
+      } else {
+        result = await downloadService.addNzb(formData.magnetLink, downloadPath);
+      }
+      
+      console.log('✅ Download added successfully:', result);
+      setFormData({ ...formData, magnetLink: '', selectedTags: [] });
+      onDownloadAdded();
+      alert(`✅ Download "${result.name}" added successfully!`);
+    } catch (err) {
+      console.error('❌ Failed to add download:', err);
+      alert('❌ Failed to add download: ' + (err instanceof Error ? err.message : 'Unknown error'));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Card withBorder shadow="sm" p="lg" style={{ width: '100%' }}>
+      <Title order={3} mb="md">Add New Download</Title>
+      
+      <form onSubmit={handleSubmit}>
+        <div style={{ marginBottom: '16px' }}>
+          <Group mb="xs">
+            <Button
+              variant={formData.downloadType === 'torrent' ? 'filled' : 'light'}
+              onClick={() => setFormData({ ...formData, downloadType: 'torrent' })}
+              size="sm"
+            >
+              Torrent/Magnet
+            </Button>
+            <Button
+              variant={formData.downloadType === 'nzb' ? 'filled' : 'light'}
+              onClick={() => setFormData({ ...formData, downloadType: 'nzb' })}
+              size="sm"
+            >
+              NZB
+            </Button>
+          </Group>
+        </div>
+
+        <div style={{ marginBottom: '16px' }}>
+          <Text size="sm" fw={500} mb="xs">
+            {formData.downloadType === 'torrent' ? 'Magnet Link or Torrent URL:' : 'NZB Content:'}
+          </Text>
+          <textarea
+            value={formData.magnetLink}
+            onChange={(e) => setFormData({ ...formData, magnetLink: e.target.value })}
+            placeholder={formData.downloadType === 'torrent' ? 'magnet:?xt=urn:btih:...' : 'Paste NZB content here...'}
+            style={{ 
+              width: '100%', 
+              minHeight: '80px',
+              padding: '8px', 
+              border: '1px solid #ced4da', 
+              borderRadius: '4px',
+              fontSize: '14px',
+              fontFamily: 'monospace',
+              resize: 'vertical'
+            }}
+            required
+          />
+        </div>
+
+        {/* Tag Selection */}
+        <div style={{ marginBottom: '16px' }}>
+          <Text size="sm" fw={500} mb="xs">Category (Optional):</Text>
+          <Select
+            placeholder="Select a category"
+            data={tags.map(tag => ({
+              value: tag.id.toString(),
+              label: tag.name
+            }))}
+            value={formData.selectedTags[0]?.toString() || ''}
+            onChange={(value) => setFormData({ 
+              ...formData, 
+              selectedTags: value ? [parseInt(value)] : [],
+              downloadPath: value ? tags.find(t => t.id === parseInt(value))?.destination_folder || '/downloads' : '/downloads'
+            })}
+            clearable
+          />
+        </div>
+        
+        <div style={{ marginBottom: '16px' }}>
+          <Text size="sm" fw={500} mb="xs">Download Path:</Text>
+          <input
+            type="text"
+            value={formData.downloadPath}
+            onChange={(e) => setFormData({ ...formData, downloadPath: e.target.value })}
+            style={{ 
+              width: '100%', 
+              padding: '8px', 
+              border: '1px solid #ced4da', 
+              borderRadius: '4px',
+              fontSize: '14px'
+            }}
+          />
+        </div>
+        
+        <Button 
+          type="submit" 
+          loading={submitting}
+          disabled={!formData.magnetLink.trim()}
+          leftSection={<IconDownload size={16} />}
+          fullWidth
+        >
+          {submitting ? 'Adding Download...' : 'Add Download'}
+        </Button>
+      </form>
+    </Card>
+  );
+}
+
+// Enhanced Queue Display Component  
+function EnhancedQueueDisplay({ downloads, onUpdate }: { downloads: Download[], onUpdate: () => void }) {
+  const [actionLoading, setActionLoading] = useState<{[key: number]: string}>({});
+
+  const handleAction = async (action: string, downloadId: number) => {
+    try {
+      setActionLoading({...actionLoading, [downloadId]: action});
+      console.log(`🔄 Performing action ${action} on download ${downloadId}`);
+      
+      let result;
+      switch (action) {
+        case 'pause':
+          result = await downloadService.pauseDownload(downloadId);
+          break;
+        case 'resume':
+          result = await downloadService.resumeDownload(downloadId);
+          break;
+        case 'delete':
+          if (confirm('Are you sure you want to delete this download?')) {
+            result = await downloadService.deleteDownload(downloadId);
+          } else {
+            return;
+          }
+          break;
+        case 'restart':
+          result = await downloadService.restartDownload(downloadId);
+          break;
+      }
+      
+      console.log(`✅ Action ${action} completed:`, result);
+      await onUpdate();
+      alert(`✅ Download ${action} successful!`);
+    } catch (err) {
+      console.error(`❌ Failed to ${action} download:`, err);
+      alert(`❌ Failed to ${action} download: ` + (err instanceof Error ? err.message : 'Unknown error'));
+    } finally {
+      setActionLoading({...actionLoading, [downloadId]: ''});
+    }
+  };
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'downloading': return 'green';
+      case 'completed': return 'blue';
+      case 'failed': return 'red';
+      case 'paused': return 'yellow';
+      case 'queued': return 'orange';
+      default: return 'gray';
+    }
+  };
+
+  return (
+    <div style={{ width: '100%' }}>
+      <Group justify="space-between" mb="lg">
+        <Title order={2}>Download Queue</Title>
+        <Badge size="lg" variant="light">{downloads.length} items</Badge>
+      </Group>
+      
+      {downloads.length === 0 ? (
+        <Alert>
+          No downloads found. Start by adding your first download!
+        </Alert>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', width: '100%' }}>
+          {downloads.map((download) => (
+            <Card key={download.id} withBorder shadow="sm" p="lg" style={{ width: '100%' }}>
+              <Group justify="space-between" align="flex-start" mb="md">
+                <div style={{ flex: 1 }}>
+                  <Group align="center" mb="xs">
+                    <Title order={4} style={{ margin: 0 }}>{download.name}</Title>
+                    <Badge color={getStatusColor(download.status)} variant="light">
+                      {download.status.toUpperCase()}
+                    </Badge>
+                    {download.tags && download.tags.length > 0 && (
+                      <Group gap="xs">
+                        {download.tags.map((tag: any) => (
+                          <Badge key={tag.id} color="blue" variant="outline" size="sm">
+                            {tag.name}
+                          </Badge>
+                        ))}
+                      </Group>
+                    )}
+                  </Group>
+                  
+                  <Text size="sm" c="dimmed" mb="xs">
+                    Type: {download.download_type} | Path: {download.download_path}
+                  </Text>
+                  
+                  {download.speed > 0 && (
+                    <Text size="sm" c="dimmed">
+                      Speed: {(download.speed / 1024).toFixed(1)} MB/s
+                    </Text>
+                  )}
+                </div>
+                
+                <Group gap="xs" className="action-buttons">
+                  {download.status === 'downloading' && (
+                    <ActionIcon
+                      variant="light"
+                      color="yellow"
+                      onClick={() => handleAction('pause', download.id)}
+                      title="Pause"
+                      loading={actionLoading[download.id] === 'pause'}
+                    >
+                      <IconPlayerPause size={16} />
+                    </ActionIcon>
+                  )}
+                  
+                  {download.status === 'paused' && (
+                    <ActionIcon
+                      variant="light"
+                      color="green"
+                      onClick={() => handleAction('resume', download.id)}
+                      title="Resume"
+                      loading={actionLoading[download.id] === 'resume'}
+                    >
+                      <IconPlayerPlay size={16} />
+                    </ActionIcon>
+                  )}
+                  
+                  {download.status === 'failed' && (
+                    <ActionIcon
+                      variant="light"
+                      color="blue"
+                      onClick={() => handleAction('restart', download.id)}
+                      title="Restart"
+                      loading={actionLoading[download.id] === 'restart'}
+                    >
+                      <IconReload size={16} />
+                    </ActionIcon>
+                  )}
+                  
+                  <ActionIcon
+                    variant="light"
+                    color="red"
+                    onClick={() => handleAction('delete', download.id)}
+                    title="Delete"
+                    loading={actionLoading[download.id] === 'delete'}
+                  >
+                    <IconTrash size={16} />
+                  </ActionIcon>
+                </Group>
+              </Group>
+              
+              {download.progress > 0 && download.progress < 100 && (
+                <div>
+                  <Group justify="space-between" mb="xs">
+                    <Text size="sm">Progress</Text>
+                    <Text size="sm">{download.progress}%</Text>
+                  </Group>
+                  <Progress value={download.progress} animated={download.status === 'downloading'} />
+                </div>
+              )}
+            </Card>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default function App() {
+  const [downloads, setDownloads] = useState<Download[]>([]);
+  const [tags, setTags] = useState<Tag[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<string>('dashboard');
+
+  // Fetch downloads and tags
+  useEffect(() => {
+    console.log('🚀 App mounting, fetching data...');
+    fetchDownloads();
+    fetchTags();
+  }, []);
+
+  const fetchDownloads = async () => {
+    try {
+      setLoading(true);
+      console.log('📥 Fetching downloads...');
+      const data = await downloadService.getDownloads();
+      console.log('✅ Downloads fetched:', data.length, 'items');
+      setDownloads(data);
+      setError(null);
+    } catch (err) {
+      console.error('❌ Error fetching downloads:', err);
+      setError(err instanceof Error ? err.message : 'Failed to fetch downloads');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchTags = async () => {
+    try {
+      console.log('📥 Fetching tags...');
+      const data = await tagService.getTags();
+      console.log('✅ Tags fetched:', data.length, 'items');
+      setTags(data);
+    } catch (err) {
+      console.error('❌ Error fetching tags:', err);
+    }
+  };
+
+  const refreshDownloads = () => {
+    console.log('🔄 Refreshing downloads...');
+    fetchDownloads();
+  };
+
+  const refreshTags = () => {
+    console.log('🔄 Refreshing tags...');
+    fetchTags();
+  };
+
+  // Calculate stats
+  const stats = {
+    total: downloads.length,
+    downloading: downloads.filter(d => d.status === 'downloading').length,
+    completed: downloads.filter(d => d.status === 'completed').length,
+    queued: downloads.filter(d => d.status === 'queued').length,
+    failed: downloads.filter(d => d.status === 'failed').length,
+  };
+
+  console.log('🎯 App rendering:', { downloads: downloads.length, tags: tags.length, activeTab, loading, error });
+
+  return (
+    <MantineProvider>
+      <div style={{ 
+        minHeight: '100vh', 
+        width: '100vw',
+        backgroundColor: '#f8f9fa',
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        overflow: 'auto'
+      }}>
+        {/* Header */}
+        <div style={{ 
+          backgroundColor: 'white', 
+          borderBottom: '1px solid #dee2e6', 
+          padding: '16px 0',
+          width: '100%',
+          position: 'sticky',
+          top: 0,
+          zIndex: 100
+        }}>
+          <Container size="xl" style={{ width: '100%', maxWidth: '1200px' }}>
+            <Group justify="space-between">
+              <Title order={1}>Media Downloader</Title>
+              <Group>
+                <Badge color="blue" variant="light">
+                  {downloads.length} downloads | {tags.length} tags
+                </Badge>
+                <Button
+                  leftSection={<IconRefresh size={16} />}
+                  variant="light"
+                  loading={loading}
+                  onClick={refreshDownloads}
+                >
+                  Refresh
+                </Button>
+              </Group>
+            </Group>
+          </Container>
+        </div>
+
+        <Container size="xl" py="xl" style={{ width: '100%', maxWidth: '1200px' }}>
+          {/* Global Error Display */}
+          {error && (
+            <Alert color="red" title="Connection Error" mb="xl">
+              {error}
+              <Button mt="sm" size="xs" onClick={refreshDownloads}>
+                Retry
+              </Button>
+            </Alert>
+          )}
+
+          {/* Navigation Tabs */}
+          <Tabs value={activeTab} onChange={(value) => { console.log("🔄 Tab changed to:", value); setActiveTab(value || "dashboard"); }} mb="xl">
+            <Tabs.List>
+              <Tabs.Tab value="dashboard" leftSection={<IconList size={16} />}>
+                Dashboard
+              </Tabs.Tab>
+              <Tabs.Tab value="add" leftSection={<IconDownload size={16} />}>
+                Add Download
+              </Tabs.Tab>
+              <Tabs.Tab value="queue" leftSection={<IconList size={16} />}>
+                Queue ({downloads.length})
+              </Tabs.Tab>
+              <Tabs.Tab value="debug" leftSection={<IconBug size={16} />}>
+                Debug
+              </Tabs.Tab>
+            </Tabs.List>
+
+            <Tabs.Panel value="dashboard" pt="xl">
+              <Title order={2} mb="lg">Dashboard</Title>
+              
+              {/* Stats Grid */}
+              <Grid mb="xl">
+                <Grid.Col span={2.4}>
+                  <Card withBorder shadow="sm" p="lg" style={{ textAlign: 'center' }}>
+                    <Text size="xl" fw={700} c="blue">{stats.total}</Text>
+                    <Text size="sm" c="dimmed">Total Downloads</Text>
+                  </Card>
+                </Grid.Col>
+                <Grid.Col span={2.4}>
+                  <Card withBorder shadow="sm" p="lg" style={{ textAlign: 'center' }}>
+                    <Text size="xl" fw={700} c="green">{stats.downloading}</Text>
+                    <Text size="sm" c="dimmed">Active</Text>
+                  </Card>
+                </Grid.Col>
+                <Grid.Col span={2.4}>
+                  <Card withBorder shadow="sm" p="lg" style={{ textAlign: 'center' }}>
+                    <Text size="xl" fw={700} c="orange">{stats.queued}</Text>
+                    <Text size="sm" c="dimmed">Queued</Text>
+                  </Card>
+                </Grid.Col>
+                <Grid.Col span={2.4}>
+                  <Card withBorder shadow="sm" p="lg" style={{ textAlign: 'center' }}>
+                    <Text size="xl" fw={700} c="blue">{stats.completed}</Text>
+                    <Text size="sm" c="dimmed">Completed</Text>
+                  </Card>
+                </Grid.Col>
+                <Grid.Col span={2.4}>
+                  <Card withBorder shadow="sm" p="lg" style={{ textAlign: 'center' }}>
+                    <Text size="xl" fw={700} c="red">{stats.failed}</Text>
+                    <Text size="sm" c="dimmed">Failed</Text>
+                  </Card>
+                </Grid.Col>
+              </Grid>
+
+              {!loading && !error && (
+                <Alert color="green" title="System Status" mb="xl">
+                  ✅ API Connected Successfully! Found {downloads.length} downloads and {tags.length} tags.
+                </Alert>
+              )}
+
+              {/* Quick Add Form */}
+              <EnhancedDownloadForm onDownloadAdded={refreshDownloads} tags={tags} />
+            </Tabs.Panel>
+
+            <Tabs.Panel value="add" pt="xl">
+              <EnhancedDownloadForm onDownloadAdded={() => {
+                refreshDownloads();
+                setActiveTab('queue');
+              }} tags={tags} />
+            </Tabs.Panel>
+
+            <Tabs.Panel value="queue" pt="xl">
+              <EnhancedQueueDisplay downloads={downloads} onUpdate={refreshDownloads} />
+            </Tabs.Panel>
+
+            <Tabs.Panel value="debug" pt="xl">
+              <Title order={2} mb="lg">Debug Panel</Title>
+              
+              <Grid>
+                <Grid.Col span={6}>
+                  <ConnectionTest />
+                </Grid.Col>
+                
+                <Grid.Col span={6}>
+                  <Card withBorder shadow="sm" p="lg">
+                    <Title order={4} mb="md">Application Status</Title>
+                    <div className="debug-info">
+                      <div><strong>Frontend State:</strong></div>
+                      <div>• Downloads loaded: {downloads.length}</div>
+                      <div>• Tags loaded: {tags.length}</div>
+                      <div>• Loading: {loading.toString()}</div>
+                      <div>• Error: {error || 'None'}</div>
+                      <div>• Active tab: {activeTab}</div>
+                      <div>• Current time: {new Date().toLocaleString()}</div>
+                    </div>
+                  </Card>
+                </Grid.Col>
+              </Grid>
+            </Tabs.Panel>
+          </Tabs>
+        </Container>
+      </div>
+    </MantineProvider>
+  );
+}

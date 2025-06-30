@@ -1,0 +1,272 @@
+import { useState, useEffect } from 'react';
+import {
+    Card,
+    Text,
+    Group,
+    Stack,
+    Title,
+    Badge,
+    Button,
+    Code,
+    Alert,
+    Collapse,
+    ActionIcon,
+    Table,
+    Tooltip,
+    Flex,
+} from '@mantine/core';
+import {
+    IconBug,
+    IconChevronDown,
+    IconChevronUp,
+    IconRefresh,
+    IconCheck,
+    IconX,
+    IconAlertTriangle,
+} from '@tabler/icons-react';
+import { showNotification } from '@mantine/notifications';
+import { downloadService, tagService, mediaManagerService } from '../services/api';
+import { LogViewer } from './LogViewer';
+import logger from '../services/logging';
+
+interface SystemStatus {
+    backend: 'connected' | 'error' | 'checking';
+    api_endpoints: Record<string, 'ok' | 'error' | 'checking'>;
+    frontend_errors: string[];
+    last_check: string;
+}
+
+export function DebugPanel() {
+    const [isOpen, setIsOpen] = useState(false);
+    const [status, setStatus] = useState<SystemStatus>({
+        backend: 'checking',
+        api_endpoints: {},
+        frontend_errors: [],
+        last_check: 'Never'
+    });
+    const [isChecking, setIsChecking] = useState(false);
+    const [showLogViewer, setShowLogViewer] = useState(false);
+
+    const checkSystemHealth = async () => {
+        setIsChecking(true);
+        const newStatus: SystemStatus = {
+            backend: 'checking',
+            api_endpoints: {},
+            frontend_errors: [],
+            last_check: new Date().toLocaleTimeString()
+        };
+
+        try {
+            // Test basic health endpoint
+            const response = await fetch('http://localhost:8000/health');
+            if (response.ok) {
+                newStatus.backend = 'connected';
+            } else {
+                newStatus.backend = 'error';
+            }
+        } catch (error) {
+            newStatus.backend = 'error';
+            console.error('Backend health check failed:', error);
+        }
+
+        // Test API endpoints with better error handling
+        const endpoints = [
+            { name: 'Downloads', test: () => downloadService.getDownloads() },
+            { name: 'Queue Status', test: () => downloadService.getQueueStatus() },
+            { name: 'Tags', test: () => tagService.getTags() },
+        ];
+
+        for (const endpoint of endpoints) {
+            try {
+                await endpoint.test();
+                newStatus.api_endpoints[endpoint.name] = 'ok';
+            } catch (error) {
+                newStatus.api_endpoints[endpoint.name] = 'error';
+                console.error(`${endpoint.name} endpoint failed:`, error);
+            }
+        }
+
+        // Collect any frontend errors from localStorage or console
+        const storedErrors = localStorage.getItem('frontend_errors');
+        if (storedErrors) {
+            try {
+                newStatus.frontend_errors = JSON.parse(storedErrors);
+            } catch (e) {
+                // Ignore parse errors
+            }
+        }
+
+        setStatus(newStatus);
+        setIsChecking(false);
+    };
+
+    const clearErrors = () => {
+        localStorage.removeItem('frontend_errors');
+        setStatus(prev => ({ ...prev, frontend_errors: [] }));
+        showNotification({
+            title: 'Debug',
+            message: 'Frontend errors cleared',
+            color: 'blue',
+        });
+    };
+
+    const testApiCall = async (endpoint: string) => {
+        try {
+            switch (endpoint) {
+                case 'cleanup':
+                    const result = await downloadService.cleanupDownloads();
+                    showNotification({
+                        title: 'Cleanup Complete',
+                        message: result.message || 'Downloads cleaned up',
+                        color: 'green',
+                    });
+                    break;
+                case 'test-data':
+                    showNotification({
+                        title: 'Test',
+                        message: 'Test functionality not implemented',
+                        color: 'yellow',
+                    });
+                    break;
+                default:
+                    showNotification({
+                        title: 'Unknown Action',
+                        message: `Action ${endpoint} not implemented`,
+                        color: 'yellow',
+                    });
+            }
+        } catch (error) {
+            showNotification({
+                title: 'API Test Failed',
+                message: `Failed to test ${endpoint}: ${error}`,
+                color: 'red',
+            });
+        }
+    };
+
+    useEffect(() => {
+        checkSystemHealth();
+    }, []);
+
+    const getStatusColor = (status: string) => {
+        switch (status) {
+            case 'ok':
+            case 'connected':
+                return 'green';
+            case 'error':
+                return 'red';
+            case 'checking':
+                return 'yellow';
+            default:
+                return 'gray';
+        }
+    };
+
+    const getStatusIcon = (status: string) => {
+        switch (status) {
+            case 'ok':
+            case 'connected':
+                return <IconCheck size={16} />;
+            case 'error':
+                return <IconX size={16} />;
+            case 'checking':
+                return <IconAlertTriangle size={16} />;
+            default:
+                return <IconAlertTriangle size={16} />;
+        }
+    };
+
+    return (
+        <Card shadow="sm" p="xs" radius="md" withBorder style={{ position: 'fixed', bottom: 20, right: 20, zIndex: 1000, maxWidth: 400 }}>
+            <Flex justify="space-between" align="center" onClick={() => setIsOpen(!isOpen)} style={{ cursor: 'pointer' }}>
+                <Group spacing="xs">
+                    <IconBug size={16} />
+                    <Text size="sm" fw={500}>Debug Panel</Text>
+                    <Group spacing={4}>
+                        {getStatusIcon(status.backend)}
+                        <Badge color={getStatusColor(status.backend)} size="sm">
+                            {status.backend}
+                        </Badge>
+                    </Group>
+                </Group>
+                <ActionIcon size="sm">
+                    {isOpen ? <IconChevronDown size={16} /> : <IconChevronUp size={16} />}
+                </ActionIcon>
+            </Flex>
+
+            <Collapse in={isOpen}>
+                <Stack spacing="md" mt="md">
+                    <Flex justify="space-between" align="center">
+                        <Text size="sm">Last check: {status.last_check}</Text>
+                        <Button
+                            size="xs"
+                            leftIcon={<IconRefresh size={14} />}
+                            onClick={checkSystemHealth}
+                            loading={isChecking}
+                        >
+                            Refresh
+                        </Button>
+                    </Flex>
+
+                    <Stack spacing="xs">
+                        <Text size="sm" fw={500}>API Endpoints</Text>
+                        <Table size="xs">
+                            <Table.Tbody>
+                                {Object.entries(status.api_endpoints).map(([name, endpointStatus]) => (
+                                    <Table.Tr key={name}>
+                                        <Table.Td>{name}</Table.Td>
+                                        <Table.Td>
+                                            <Group spacing={4}>
+                                                {getStatusIcon(endpointStatus)}
+                                                <Badge color={getStatusColor(endpointStatus)} size="xs">
+                                                    {endpointStatus}
+                                                </Badge>
+                                            </Group>
+                                        </Table.Td>
+                                    </Table.Tr>
+                                ))}
+                            </Table.Tbody>
+                        </Table>
+                    </Stack>
+
+                    {status.frontend_errors.length > 0 && (
+                        <Stack spacing="xs">
+                            <Flex justify="space-between" align="center">
+                                <Text size="sm" fw={500} c="red">Frontend Errors</Text>
+                                <Button size="xs" variant="outline" onClick={clearErrors}>
+                                    Clear
+                                </Button>
+                            </Flex>
+                            {status.frontend_errors.slice(0, 3).map((error, index) => (
+                                <Alert key={index} color="red" p="xs">
+                                    <Code size="xs">{error}</Code>
+                                </Alert>
+                            ))}
+                        </Stack>
+                    )}
+
+                    <Stack spacing="xs">
+                        <Text size="sm" fw={500}>Quick Actions</Text>
+                        <Group spacing="xs">
+                            <Button size="xs" variant="outline" onClick={() => testApiCall('cleanup')}>
+                                Cleanup Downloads
+                            </Button>
+                            <Button size="xs" variant="outline" onClick={() => setShowLogViewer(true)}>
+                                View Logs
+                            </Button>
+                            <Button size="xs" variant="outline" onClick={() => window.location.reload()}>
+                                Reload Page
+                            </Button>
+                        </Group>
+                    </Stack>
+
+                    <Text size="xs" c="dimmed">
+                        Environment: {process.env.NODE_ENV || 'development'}
+                    </Text>
+                </Stack>
+            </Collapse>
+            
+            <LogViewer opened={showLogViewer} onClose={() => setShowLogViewer(false)} />
+        </Card>
+    );
+}

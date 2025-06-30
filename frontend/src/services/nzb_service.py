@@ -74,12 +74,35 @@ class NZBService:
             "server_errors": 0
         }
 
+    def _count_files_and_segments(self, nzb_content: str) -> tuple[int, int]:
+        """Count the number of files and segments in an NZB file"""
+        try:
+            tree = ET.parse(StringIO(nzb_content))
+            root = tree.getroot()
+            
+            # Count files
+            files = root.findall(".//{http://www.newzbin.com/DTD/2003/nzb}file")
+            file_count = len(files)
+            
+            # Count segments across all files
+            segments = root.findall(".//{http://www.newzbin.com/DTD/2003/nzb}segment")
+            segment_count = len(segments)
+            
+            return file_count, segment_count
+        except Exception as e:
+            logger.error(f"Error counting files and segments: {e}")
+            return 0, 0
+
     async def add_nzb_download(self, nzb_content: str, filename: str, download_path: str, download_id: int, db = None) -> bool:
         """Add a new NZB download job"""
         try:
             logger.debug(f"Parsing NZB content for {filename}", extra={"download_id": download_id})
             tree = ET.parse(StringIO(nzb_content))
             root = tree.getroot()
+            
+            # Count files and segments
+            file_count, segment_count = self._count_files_and_segments(nzb_content)
+            logger.info(f"Found {file_count} files with {segment_count} total segments")
             
             # Extract segments
             segments = []
@@ -343,12 +366,7 @@ class NZBService:
                 logger.error("yEnc decoder not available")
                 return None
                 
-            decoded = yenc_decoder.decode_yenc(data)
-            if decoded:
-                return decoded
-            else:
-                logger.error(f"Failed to decode yEnc data for {message_id}")
-                return None
+            return yenc_decoder.decode_yenc(data)
                 
         except Exception as e:
             logger.error(f"💥 yEnc decode failed for {message_id}: {e}")

@@ -1,0 +1,443 @@
+import { useState, useEffect } from 'react';
+import {
+    Card,
+    Text,
+    Group,
+    Stack,
+    Title,
+    Badge,
+    Progress,
+    ActionIcon,
+    Menu,
+    Divider,
+    Paper,
+    SimpleGrid,
+    Tooltip,
+} from '@mantine/core';
+import { DragDropContext, Droppable, Draggable } from 'react-beautiful-dnd';
+import {
+    IconPlayerPause,
+    IconPlayerPlay,
+    IconTrash,
+    IconGripVertical,
+    IconArrowUp,
+    IconArrowDown,
+    IconAlertTriangle,
+    IconSettings,
+    IconCheck,
+    IconClock,
+    IconTag,
+    IconLink,
+    IconCopy,
+    IconDownload,
+} from '@tabler/icons-react';
+import { showNotification } from '@mantine/notifications';
+import { TorrentDetails } from './TorrentDetails';
+import { DownloadTagManager } from './DownloadTagManager';
+import { Download, DownloadStatus, DownloadType } from '../types/api';
+import { downloadService, tagService } from '../services/api';
+import logger from '../services/logging';
+
+interface QueueStats {
+    active: number;
+    queued: number;
+    paused: number;
+    completed: number;
+    failed: number;
+    totalSpeed: number;
+    estimatedTime: string;
+}
+
+export function QueueManager() {
+    const [downloads, setDownloads] = useState<Download[]>([]);
+    const [queueStats, setQueueStats] = useState<QueueStats>({
+        active: 0,
+        queued: 0,
+        paused: 0,
+        completed: 0,
+        failed: 0,
+        totalSpeed: 0,
+        estimatedTime: '0s',
+    });
+    const [loading, setLoading] = useState<Record<number, boolean>>({});
+    const [tagManagerOpen, setTagManagerOpen] = useState(false);
+    const [selectedDownload, setSelectedDownload] = useState<Download | null>(null);
+
+    const fetchDownloads = async () => {
+        try {
+            logger.debug('Fetching downloads and queue status', 'QueueManager');
+            const [downloadsList, stats] = await Promise.all([
+                downloadService.getDownloads(),
+                downloadService.getQueueStatus(),
+            ]);
+            setDownloads(downloadsList);
+            setQueueStats({
+                active: stats.active_downloads,
+                queued: stats.queued_downloads,
+                paused: stats.paused_downloads,
+                completed: downloadsList.filter(d => d.status === DownloadStatus.COMPLETED).length,
+                failed: downloadsList.filter(d => d.status === DownloadStatus.FAILED).length,
+                totalSpeed: downloadsList.reduce((acc, d) => acc + (d.speed || 0), 0),
+                estimatedTime: calculateEstimatedTime(downloadsList),
+            });
+            logger.info(`Queue updated: ${downloadsList.length} downloads, ${stats.active_downloads} active`, 'QueueManager');
+        } catch (error) {
+            logger.error('Failed to fetch downloads', 'QueueManager', error);
+            console.error('Failed to fetch downloads:', error);
+            showNotification({
+                title: 'Error',
+                message: 'Failed to fetch downloads',
+                color: 'red',
+            });
+        }
+    };
+
+    const calculateEstimatedTime = (downloads: Download[]): string => {
+        const activeDownloads = downloads.filter(d => d.status === DownloadStatus.DOWNLOADING);
+        if (activeDownloads.length === 0) return '0s';
+
+        const maxTime = Math.max(
+            ...activeDownloads.map(d => {
+                const remaining = 100 - d.progress;
+                return (remaining / (d.speed || 1)) * 60; // minutes
+            })
+        );
+
+        if (maxTime < 60) return `${Math.round(maxTime)}m`;
+        return `${Math.round(maxTime / 60)}h ${Math.round(maxTime % 60)}m`;
+    };
+
+    const handlePauseResume = async (download: Download) => {
+        try {
+            setLoading(prev => ({ ...prev, [download.id]: true }));
+
+            if (download.status === DownloadStatus.DOWNLOADING) {
+                await downloadService.pauseDownload(download.id);
+                showNotification({
+                    title: 'Success',
+                    message: 'Download paused',
+                    color: 'blue',
+                });
+            } else {
+                await downloadService.resumeDownload(download.id);
+                showNotification({
+                    title: 'Success',
+                    message: 'Download resumed',
+                    color: 'green',
+                });
+            }
+
+            await fetchDownloads();
+        } catch (error) {
+            console.error('Failed to pause/resume download:', error);
+            showNotification({
+                title: 'Error',
+                message: 'Failed to update download status',
+                color: 'red',
+            });
+        } finally {
+            setLoading(prev => ({ ...prev, [download.id]: false }));
+        }
+    };
+
+    const handleSetPriority = async (downloadId: number, fileIndex: number, priority: number) => {
+        try {
+            setLoading(prev => ({ ...prev, [downloadId]: true }));
+            await downloadService.setFilePriorities(downloadId, { [fileIndex]: priority });
+            await fetchDownloads();
+            showNotification({
+                title: 'Success',
+                message: 'File priority updated',
+                color: 'green',
+            });
+        } catch (error) {
+            console.error('Failed to update file priority:', error);
+            showNotification({
+                title: 'Error',
+                message: 'Failed to update file priority',
+                color: 'red',
+            });
+        } finally {
+            setLoading(prev => ({ ...prev, [downloadId]: false }));
+        }
+    };
+
+    const handleRemove = async (downloadId: number) => {
+        try {
+            setLoading(prev => ({ ...prev, [downloadId]: true }));
+            await downloadService.removeFromQueue(downloadId);
+            showNotification({
+                title: 'Success',
+                message: 'Download removed from queue',
+                color: 'green',
+            });
+            await fetchDownloads();
+        } catch (error) {
+            console.error('Failed to remove download:', error);
+            showNotification({
+                title: 'Error',
+                message: 'Failed to remove download',
+                color: 'red',
+            });
+        } finally {
+            setLoading(prev => ({ ...prev, [downloadId]: false }));
+        }
+    };
+
+    const onDragEnd = async (result: any) => {
+        if (!result.destination) return;
+
+        const sourceIndex = result.source.index;
+        const destinationIndex = result.destination.index;
+
+        if (sourceIndex === destinationIndex) return;
+
+        const downloadId = downloads[sourceIndex].id;
+        try {
+            await downloadService.reorderQueue(downloadId, destinationIndex);
+            await fetchDownloads();
+        } catch (error) {
+            console.error('Failed to reorder queue:', error);
+            showNotification({
+                title: 'Error',
+                message: 'Failed to reorder queue',
+                color: 'red',
+            });
+        }
+    };
+
+    useEffect(() => {
+        fetchDownloads();
+        const interval = setInterval(fetchDownloads, 5000);
+        return () => clearInterval(interval);
+    }, []);
+
+    const getStatusColor = (status: DownloadStatus): string => {
+        switch (status) {
+            case DownloadStatus.DOWNLOADING:
+                return 'blue';
+            case DownloadStatus.COMPLETED:
+                return 'green';
+            case DownloadStatus.FAILED:
+                return 'red';
+            case DownloadStatus.PAUSED:
+                return 'yellow';
+            default:
+                return 'gray';
+        }
+    };
+
+    const getStatusIcon = (status: DownloadStatus) => {
+        switch (status) {
+            case DownloadStatus.DOWNLOADING:
+                return <IconPlayerPause size={16} />;
+            case DownloadStatus.COMPLETED:
+                return <IconCheck size={16} />;
+            case DownloadStatus.FAILED:
+                return <IconAlertTriangle size={16} />;
+            case DownloadStatus.PAUSED:
+                return <IconPlayerPlay size={16} />;
+            default:
+                return <IconClock size={16} />;
+        }
+    };
+
+    return (
+        <Stack spacing="lg">
+            <Title order={2}>Download Queue</Title>
+
+            <SimpleGrid cols={5}>
+                <Paper p="md" radius="md" withBorder>
+                    <Text size="lg" weight={500}>Active</Text>
+                    <Text size="xl" weight={700} color="blue">{queueStats.active}</Text>
+                </Paper>
+                <Paper p="md" radius="md" withBorder>
+                    <Text size="lg" weight={500}>Queued</Text>
+                    <Text size="xl" weight={700}>{queueStats.queued}</Text>
+                </Paper>
+                <Paper p="md" radius="md" withBorder>
+                    <Text size="lg" weight={500}>Paused</Text>
+                    <Text size="xl" weight={700} color="yellow">{queueStats.paused}</Text>
+                </Paper>
+                <Paper p="md" radius="md" withBorder>
+                    <Text size="lg" weight={500}>Completed</Text>
+                    <Text size="xl" weight={700} color="green">{queueStats.completed}</Text>
+                </Paper>
+                <Paper p="md" radius="md" withBorder>
+                    <Text size="lg" weight={500}>Failed</Text>
+                    <Text size="xl" weight={700} color="red">{queueStats.failed}</Text>
+                </Paper>
+            </SimpleGrid>
+
+            <DragDropContext onDragEnd={onDragEnd}>
+                <Droppable droppableId="downloads">
+                    {(provided) => (
+                        <Stack
+                            spacing="sm"
+                            ref={provided.innerRef}
+                            {...provided.droppableProps}
+                        >
+                            {downloads.map((download, index) => (
+                                <Draggable
+                                    key={download.id}
+                                    draggableId={download.id.toString()}
+                                    index={index}
+                                    isDragDisabled={download.status === DownloadStatus.COMPLETED}
+                                >
+                                    {(provided) => (
+                                        <Card
+                                            ref={provided.innerRef}
+                                            {...provided.draggableProps}
+                                            shadow="sm"
+                                        >
+                                            <Group position="apart">
+                                                <Group spacing="sm">
+                                                    <ActionIcon
+                                                        {...provided.dragHandleProps}
+                                                        sx={{ cursor: 'grab' }}
+                                                    >
+                                                        <IconGripVertical size={16} />
+                                                    </ActionIcon>
+                                                    <Stack spacing={4}>
+                                                        <Text weight={500}>{download.name}</Text>
+                                                        <Group spacing="xs">
+                                                            <Badge
+                                                                color={download.download_type === DownloadType.TORRENT ? 'blue' : 'green'}
+                                                                size="sm"
+                                                            >
+                                                                {download.download_type}
+                                                            </Badge>
+                                                            <Badge
+                                                                color={getStatusColor(download.status)}
+                                                                size="sm"
+                                                            >
+                                                                {download.status}
+                                                            </Badge>
+                                                            {download.tags && download.tags.map((tag) => (
+                                                                <Badge
+                                                                    key={tag.id}
+                                                                    style={{ backgroundColor: tag.color }}
+                                                                    size="sm"
+                                                                    variant="filled"
+                                                                >
+                                                                    {tag.name}
+                                                                </Badge>
+                                                            ))}
+                                                        </Group>
+                                                    </Stack>
+                                                </Group>
+
+                                                <Group spacing="xs">
+                                                    <Tooltip label={download.status === DownloadStatus.DOWNLOADING ? 'Pause' : 'Resume'}>
+                                                        <ActionIcon
+                                                            color={download.status === DownloadStatus.DOWNLOADING ? 'yellow' : 'blue'}
+                                                            onClick={() => handlePauseResume(download)}
+                                                            loading={loading[download.id]}
+                                                            disabled={
+                                                                download.status === DownloadStatus.COMPLETED ||
+                                                                download.status === DownloadStatus.FAILED
+                                                            }
+                                                        >
+                                                            {getStatusIcon(download.status)}
+                                                        </ActionIcon>
+                                                    </Tooltip>
+                                                    <Menu>
+                                                        <Menu.Target>
+                                                            <ActionIcon>
+                                                                <IconSettings size={16} />
+                                                            </ActionIcon>
+                                                        </Menu.Target>
+                                                        <Menu.Dropdown>
+                                                            <Menu.Label>Download Options</Menu.Label>
+                                                            <Menu.Item
+                                                                icon={<IconArrowUp size={14} />}
+                                                                disabled={index === 0}
+                                                                onClick={() => downloadService.reorderQueue(download.id, index - 1)}
+                                                            >
+                                                                Move Up
+                                                            </Menu.Item>
+                                                            <Menu.Item
+                                                                icon={<IconArrowDown size={14} />}
+                                                                disabled={index === downloads.length - 1}
+                                                                onClick={() => downloadService.reorderQueue(download.id, index + 1)}
+                                                            >
+                                                                Move Down
+                                                            </Menu.Item>
+                                                            <Menu.Divider />
+                                                            <Menu.Item
+                                                                icon={<IconTag size={14} />}
+                                                                onClick={() => {
+                                                                    setSelectedDownload(download);
+                                                                    setTagManagerOpen(true);
+                                                                }}
+                                                            >
+                                                                Manage Tags
+                                                            </Menu.Item>
+                                                            <Menu.Divider />
+                                                            <Menu.Item
+                                                                color="red"
+                                                                icon={<IconTrash size={14} />}
+                                                                onClick={() => handleRemove(download.id)}
+                                                            >
+                                                                Remove
+                                                            </Menu.Item>
+                                                        </Menu.Dropdown>
+                                                    </Menu>
+                                                </Group>
+                                            </Group>
+
+                                            <Progress
+                                                value={download.progress}
+                                                label={`${Math.round(download.progress)}%`}
+                                                size="xl"
+                                                mt="md"
+                                                color={getStatusColor(download.status)}
+                                                striped={download.status === DownloadStatus.DOWNLOADING}
+                                                animate={download.status === DownloadStatus.DOWNLOADING}
+                                            />
+
+                                            {/* Enhanced download information */}
+                                            {download.download_type === DownloadType.TORRENT && (
+                                                <TorrentDetails
+                                                    download={download}
+                                                    onSetPriority={(fileIndex, priority) => 
+                                                        handleSetPriority(download.id, fileIndex, priority)
+                                                    }
+                                                />
+                                            )}
+
+                                            {download.status === DownloadStatus.DOWNLOADING && (
+                                                <Group position="apart" mt="xs">
+                                                    <Text size="sm" color="dimmed">
+                                                        Speed: {(download.speed || 0).toFixed(2)} MB/s
+                                                    </Text>
+                                                    <Text size="sm" color="dimmed">
+                                                        ETA: {download.eta || 'calculating...'}
+                                                    </Text>
+                                                </Group>
+                                            )}
+                                        </Card>
+                                    )}
+                                </Draggable>
+                            ))}
+                            {provided.placeholder}
+                        </Stack>
+                    )}
+                </Droppable>
+            </DragDropContext>
+
+            {selectedDownload && (
+                <DownloadTagManager
+                    download={selectedDownload}
+                    opened={tagManagerOpen}
+                    onClose={() => {
+                        setTagManagerOpen(false);
+                        setSelectedDownload(null);
+                    }}
+                    onTagsUpdated={fetchDownloads}
+                />
+            )}
+        </Stack>
+    );
+}
+

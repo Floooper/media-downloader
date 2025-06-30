@@ -1,0 +1,512 @@
+console.log("🔥 App.tsx is loading...");
+import React, { useState, useEffect } from 'react';
+import {
+  ThemeProvider,
+  createTheme,
+  CssBaseline,
+  Container,
+  Box,
+  Typography,
+  Button,
+  Tabs,
+  Tab,
+  Card,
+  CardContent,
+  Grid,
+  Alert,
+  Chip,
+  LinearProgress,
+  IconButton,
+  TextField,
+  Select,
+  MenuItem,
+  FormControl,
+  InputLabel,
+  Paper,
+  Stack
+} from '@mui/material';
+import {
+  Refresh as RefreshIcon,
+  Download as DownloadIcon,
+  List as ListIcon,
+  BugReport as BugIcon,
+  Pause as PauseIcon,
+  PlayArrow as PlayIcon,
+  Delete as DeleteIcon,
+  Settings as SettingsIcon
+} from '@mui/icons-material';
+import { SimpleErrorBoundary } from './components/SimpleErrorBoundary';
+
+import ConnectionTest from './components/ConnectionTest';
+import ConfigSettings from './components/ConfigSettings';
+import UsenetSettings from './components/UsenetSettings';
+import { QueueManager } from './components/QueueManager';
+
+// Import types and services
+import { Download } from './types/api';
+import { downloadService, tagService } from './services/api';
+
+// Create MUI theme
+const theme = createTheme({
+  palette: {
+    mode: 'dark',
+    primary: {
+      main: '#1976d2',
+    },
+    secondary: {
+      main: '#dc004e',
+    },
+    background: {
+      default: '#121212',
+      paper: '#1e1e1e',
+    },
+  },
+});
+
+// Types for tags
+interface Tag {
+  id: number;
+  name: string;
+  color: string;
+  destination_folder?: string;
+  auto_assign_pattern?: string;
+  description?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+// Enhanced Download Form Component
+function EnhancedDownloadForm({ onDownloadAdded, tags }: { onDownloadAdded: () => void, tags: Tag[] }) {
+  const [formData, setFormData] = useState({
+    url: '',
+    file: null as File | null,
+    downloadPath: '/downloads',
+    downloadType: 'torrent',
+    inputMethod: 'url' as 'url' | 'file',
+    selectedTags: [] as number[]
+  });
+  const [submitting, setSubmitting] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (formData.inputMethod === 'url' && !formData.url.trim()) {
+      alert('Please enter a URL');
+      return;
+    }
+    if (formData.inputMethod === 'file' && !formData.file) {
+      alert('Please select a file');
+      return;
+    }
+
+    setSubmitting(true);
+    
+    try {
+      const downloadData = {
+        url: formData.inputMethod === 'url' ? formData.url : '',
+        download_path: formData.downloadPath,
+        download_type: formData.downloadType,
+        tag_ids: formData.selectedTags
+      };
+
+      if (formData.inputMethod === 'file' && formData.file) {
+        const fileFormData = new FormData();
+        fileFormData.append('file', formData.file);
+        fileFormData.append('download_path', formData.downloadPath);
+        fileFormData.append('download_type', formData.downloadType);
+        fileFormData.append('tag_ids', JSON.stringify(formData.selectedTags));
+        
+                // Use the correct endpoint based on download type
+        const endpoint = formData.downloadType === 'torrent' 
+          ? '/api/downloads/torrent-file'
+          : '/api/downloads/nzb-file';
+        
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          body: fileFormData
+        });
+        
+        if (!response.ok) {
+          throw new Error('Upload failed');
+        }
+      } else {
+        await downloadService.addDownload(downloadData);
+      }
+
+      setFormData({
+        url: '',
+        file: null,
+        downloadPath: '/downloads',
+        downloadType: 'torrent',
+        inputMethod: 'url',
+        selectedTags: []
+      });
+
+      onDownloadAdded();
+      alert('Download added successfully!');
+    } catch (error) {
+      console.error('Error adding download:', error);
+      alert('Failed to add download. Please try again.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Card sx={{ mb: 3 }}>
+      <CardContent>
+        <Typography variant="h6" gutterBottom>
+          Add New Download
+        </Typography>
+        <Box component="form" onSubmit={handleSubmit} sx={{ mt: 2 }}>
+          <Grid container spacing={2}>
+            <Grid item xs={12}>
+              <FormControl fullWidth>
+                <InputLabel>Input Method</InputLabel>
+                <Select
+                  value={formData.inputMethod}
+                  label="Input Method"
+                  onChange={(e) => setFormData({ ...formData, inputMethod: e.target.value as 'url' | 'file' })}
+                >
+                  <MenuItem value="url">URL/Magnet Link</MenuItem>
+                  <MenuItem value="file">Upload File (.torrent/.nzb)</MenuItem>
+                </Select>
+              </FormControl>
+            </Grid>
+
+            {formData.inputMethod === 'url' ? (
+              <Grid item xs={12}>
+                <TextField
+                  fullWidth
+                  label="URL or Magnet Link"
+                  placeholder="https://example.com/file.torrent or magnet:?xt=..."
+                  value={formData.url}
+                  onChange={(e) => setFormData({ ...formData, url: e.target.value })}
+                />
+              </Grid>
+            ) : (
+              <Grid item xs={12}>
+                <input
+                  type="file"
+                  accept=".torrent,.nzb"
+                  onChange={(e) => setFormData({ ...formData, file: e.target.files?.[0] || null })}
+                  style={{ width: '100%', padding: '10px', border: '1px solid #555', borderRadius: '4px', backgroundColor: '#333', color: '#fff' }}
+                />
+              </Grid>
+            )}
+
+            <Grid item xs={6}>
+              <TextField
+                fullWidth
+                label="Download Path"
+                value={formData.downloadPath}
+                onChange={(e) => setFormData({ ...formData, downloadPath: e.target.value })}
+              />
+            </Grid>
+
+            <Grid item xs={6}>
+              <FormControl fullWidth>
+                <InputLabel>Download Type</InputLabel>
+                <Select
+                  value={formData.downloadType}
+                  label="Download Type"
+                  onChange={(e) => setFormData({ ...formData, downloadType: e.target.value })}
+                >
+                  <MenuItem value="torrent">Torrent</MenuItem>
+                  <MenuItem value="nzb">NZB</MenuItem>
+                  <MenuItem value="direct">Direct Download</MenuItem>
+                </Select>
+              </FormControl>
+            </Grid>
+
+            {tags.length > 0 && (
+              <Grid item xs={12}>
+                <Typography variant="subtitle2" gutterBottom>
+                  Tags (Optional)
+                </Typography>
+                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                  {tags.map((tag) => (
+                    <Chip
+                      key={tag.id}
+                      label={tag.name}
+                      clickable
+                      color={formData.selectedTags.includes(tag.id) ? 'primary' : 'default'}
+                      onClick={async () => {
+                        const newTags = formData.selectedTags.includes(tag.id)
+                          ? formData.selectedTags.filter(id => id !== tag.id)
+                          : [...formData.selectedTags, tag.id];
+                        setFormData({ ...formData, selectedTags: newTags });
+                      }}
+                    />
+                  ))}
+                </Box>
+              </Grid>
+            )}
+          </Grid>
+
+          <Button
+            type="submit"
+            variant="contained"
+            fullWidth
+            disabled={
+              (formData.inputMethod === 'url' && !formData.url.trim()) ||
+              (formData.inputMethod === 'file' && !formData.file)
+            }
+            startIcon={<DownloadIcon />}
+            sx={{ mt: 3 }}
+          >
+            {submitting ? 'Adding Download...' : 'Add Download'}
+          </Button>
+        </Box>
+      </CardContent>
+    </Card>
+  );
+}
+
+// Main App Component
+function App() {
+  const [downloads, setDownloads] = useState<Download[]>([]);
+  const [tags, setTags] = useState<Tag[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState('dashboard');
+
+  console.log("🔄 App state:", { downloadsCount: downloads.length, tagsCount: tags.length, activeTab });
+
+  const refreshDownloads = async () => {
+    console.log("🔄 Refreshing downloads...");
+    setLoading(true);
+    try {
+      const [downloadsData, tagsData] = await Promise.all([
+        downloadService.getDownloads(),
+        tagService.getTags()
+      ]);
+      setDownloads(downloadsData);
+      setTags(tagsData);
+      console.log("✅ Downloads refreshed:", downloadsData.length, "downloads,", tagsData.length, "tags");
+    } catch (error) {
+      console.error("❌ Error refreshing downloads:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    console.log("🚀 App useEffect triggered");
+    refreshDownloads();
+  }, []);
+
+  const handleTabChange = (event: React.SyntheticEvent, newValue: string) => {
+    console.log("🔄 Tab changed to:", newValue);
+    setActiveTab(newValue);
+  };
+
+  return (
+    <ThemeProvider theme={theme}>
+      <CssBaseline />
+      <SimpleErrorBoundary>
+        <Container maxWidth="xl" sx={{ py: 4 }}>
+          {/* Header */}
+          <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 4 }}>
+            <Typography variant="h3" component="h1">
+              🎬 Media Downloader
+            </Typography>
+            <Stack direction="row" spacing={2} alignItems="center">
+              <Chip 
+                label={`${downloads.length} downloads | ${tags.length} tags`}
+                color="primary"
+                variant="outlined"
+              />
+              <Button
+                startIcon={<RefreshIcon />}
+                variant="outlined"
+                disabled={loading}
+                onClick={refreshDownloads}
+              >
+                {loading ? 'Refreshing...' : 'Refresh'}
+              </Button>
+            </Stack>
+          </Stack>
+
+          {/* Navigation Tabs */}
+          <Paper sx={{ mb: 3 }}>
+            <Tabs value={activeTab} onChange={handleTabChange}>
+              <Tab icon={<ListIcon />} label="Dashboard" value="dashboard" />
+              <Tab icon={<DownloadIcon />} label="Add Download" value="add" />
+              <Tab icon={<ListIcon />} label={`Queue (${downloads.length})`} value="queue" />
+              <Tab icon={<BugIcon />} label="Debug" value="debug" />
+              <Tab icon={<SettingsIcon />} label="Usenet Settings" value="usenet" />
+            </Tabs>
+          </Paper>
+
+          {/* Tab Panels */}
+          {activeTab === 'dashboard' && (
+            <Box>
+              <Typography variant="h4" gutterBottom>
+                Dashboard
+              </Typography>
+              <Grid container spacing={3}>
+                <Grid item xs={12} md={6}>
+                  <Card>
+                    <CardContent>
+                      <Typography variant="h6" gutterBottom>
+                        Recent Downloads
+                      </Typography>
+                      {downloads.length === 0 ? (
+                        <Typography color="textSecondary">
+                          No downloads yet. Add some downloads to get started!
+                        </Typography>
+                      ) : (
+                        <Stack spacing={2}>
+                          {downloads.slice(0, 5).map((download) => (
+                            <Box key={download.id}>
+                              <Typography variant="body2" noWrap>
+                                {download.filename || download.url}
+                              </Typography>
+                              <Stack direction="row" spacing={1} alignItems="center">
+                                <Chip
+                                  size="small"
+                                  label={download.status}
+                                  color={download.status === 'completed' ? 'success' : 
+                                        download.status === 'downloading' ? 'primary' : 'default'}
+                                />
+                                {download.progress !== undefined && (
+                                  <Box sx={{ width: '100px' }}>
+                                    <LinearProgress 
+                                      variant="determinate" 
+                                      value={download.progress} 
+                                    />
+                                  </Box>
+                                )}
+                              </Stack>
+                            </Box>
+                          ))}
+                        </Stack>
+                      )}
+                    </CardContent>
+                  </Card>
+                </Grid>
+                
+                <Grid item xs={12} md={6}>
+                  <Card>
+                    <CardContent>
+                      <Typography variant="h6" gutterBottom>
+                        System Status
+                      </Typography>
+                      <ConnectionTest />
+                    </CardContent>
+                  </Card>
+                </Grid>
+              </Grid>
+            </Box>
+          )}
+
+          {activeTab === 'add' && (
+            <Box>
+              <Typography variant="h4" gutterBottom>
+                Add Download
+              </Typography>
+              <EnhancedDownloadForm onDownloadAdded={refreshDownloads} tags={tags} />
+            </Box>
+          )}
+
+          {activeTab === 'queue' && (
+            <Box>
+              <Typography variant="h4" gutterBottom>
+                Download Queue
+              </Typography>
+              {downloads.length === 0 ? (
+                <Alert severity="info">
+                  No downloads in queue. Add some downloads to see them here!
+                </Alert>
+              ) : (
+                <Grid container spacing={2}>
+                  {downloads.map((download) => (
+                    <Grid item xs={12} key={download.id}>
+                      <Card>
+                        <CardContent>
+                          <Stack direction="row" justifyContent="space-between" alignItems="center">
+                            <Box sx={{ flex: 1 }}>
+                              <Typography variant="h6" noWrap>
+                                {download.filename || download.url}
+                              </Typography>
+                              <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 1 }}>
+                                <Chip
+                                  size="small"
+                                  label={download.status}
+                                  color={download.status === 'completed' ? 'success' : 
+                                        download.status === 'downloading' ? 'primary' : 'default'}
+                                />
+                                {download.progress !== undefined && (
+                                  <Box sx={{ width: '200px' }}>
+                                    <LinearProgress 
+                                      variant="determinate" 
+                                      value={download.progress} 
+                                    />
+                                    <Typography variant="caption">
+                                      {download.progress}%
+                                    </Typography>
+                                  </Box>
+                                )}
+                              </Stack>
+                            </Box>
+                            <Stack direction="row" spacing={1}>
+                              <IconButton 
+                                size="small"
+                                onClick={async () => {
+                                  if (download.status === 'downloading') { await downloadService.pauseDownload(download.id); } else { await downloadService.resumeDownload(download.id); } await refreshDownloads();
+                                }}
+                              >
+                                {download.status === 'downloading' ? <PauseIcon /> : <PlayIcon />}
+                              </IconButton>
+                              <IconButton 
+                                size="small"
+                                color="error"
+                                onClick={async () => {
+                                  await downloadService.removeFromQueue(download.id); await refreshDownloads();
+                                }}
+                              >
+                                <DeleteIcon />
+                              </IconButton>
+                            </Stack>
+                          </Stack>
+                        </CardContent>
+                      </Card>
+                    </Grid>
+                  ))}
+                </Grid>
+              )}
+            </Box>
+          )}
+
+          {activeTab === 'debug' && (
+            <Box>
+              <Typography variant="h4" gutterBottom>
+                Debug Panel
+              </Typography>
+              <Grid container spacing={3}>
+                <Grid item xs={12}>
+                  <Card>
+                    <CardContent>
+                      <Typography variant="h6" gutterBottom>
+                        System Information
+                      </Typography>
+                      <ConfigSettings />
+                    </CardContent>
+                  </Card>
+                </Grid>
+              </Grid>
+            </Box>
+          )}
+
+          {activeTab === 'usenet' && (
+            <Box>
+              <UsenetSettings />
+            </Box>
+          )}
+        </Container>
+      </SimpleErrorBoundary>
+    </ThemeProvider>
+  );
+}
+
+export default App;

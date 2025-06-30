@@ -1,0 +1,46 @@
+// 🚨 MAIN.TSX EXECUTING - THIS SHOULD APPEAR IN BROWSER DEV TOOLS
+console.log("🚨 MAIN.TSX STARTING EXECUTION");
+import React from 'react'
+import ReactDOM from 'react-dom/client'
+import App from './App.tsx'
+import './index.css'
+
+// Global error handling
+window.addEventListener('error', (e) => {
+  console.error('🚨 GLOBAL ERROR:', e.error);
+  console.error('🚨 Error message:', e.message);
+  console.error('🚨 Error source:', e.filename, ':', e.lineno, ':', e.colno);
+  console.error('🚨 Error stack:', e.error?.stack);
+});
+
+window.addEventListener('unhandledrejection', (e) => {
+  console.error('🚨 UNHANDLED PROMISE REJECTION:', e.reason);
+  e.preventDefault(); // Prevent the default handling
+});
+
+console.log('🚀 main.tsx loading...');
+
+try {
+  const rootElement = document.getElementById('root');
+  console.log('🔍 Root element:', rootElement);
+
+  if (rootElement) {
+    console.log('🔧 Creating React root...');
+    const root = ReactDOM.createRoot(rootElement);
+    console.log('🎯 Rendering App...');
+    
+    root.render(
+      <>
+        <App />
+      </>
+    );
+    console.log('✅ App rendered successfully with MUI');
+  } else {
+    console.error('❌ Root element not found!');
+    document.body.innerHTML = '<h1 style="color: red;">❌ Root element not found!</h1>';
+  }
+} catch (error) {
+  console.error('❌ Failed to render app:', error);
+  document.body.style.background = "red";
+  document.body.innerHTML = `<h1 style="color: red;">❌ Failed to render app: ${error.message}</h1>`;
+}
