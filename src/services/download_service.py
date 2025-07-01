@@ -1,3 +1,4 @@
+import logging\n\nlogger = logging.getLogger(__name__)\n
 from typing import Optional, Dict, List
 from datetime import datetime
 from sqlalchemy.orm import Session
@@ -27,9 +28,9 @@ class DownloadService:
                     self.download_to_torrent_map = {
                         int(k): v for k, v in string_mappings.items()
                     }
-                print(f"Loaded {len(self.download_to_torrent_map)} torrent mappings")
+                logger.info(f"Loaded {len(self.download_to_torrent_map)} torrent mappings")
         except Exception as e:
-            print(f"Failed to load torrent mappings: {e}")
+            logger.error(f"Failed to load torrent mappings: {e}")
             self.download_to_torrent_map = {}
 
     def _save_torrent_mappings(self):
@@ -41,7 +42,7 @@ class DownloadService:
             with open(self.mappings_file, 'w') as f:
                 json.dump(string_mappings, f)
         except Exception as e:
-            print(f"Failed to save torrent mappings: {e}")
+            logger.error(f"Failed to save torrent mappings: {e}")
 
     def set_torrent_downloader(self, torrent_downloader):
         """Inject the torrent downloader service"""
@@ -140,7 +141,7 @@ class DownloadService:
                         download = self._download_table_to_model(download_table)
                         
                 except Exception as e:
-                    print(f"Failed to start torrent download: {e}")
+                    logger.error(f"Failed to start torrent download: {e}")
                     # Keep the database entry but mark as failed
                     download_table.status = DownloadStatus.FAILED
                     download_table.error_message = str(e)
@@ -225,7 +226,7 @@ class DownloadService:
                         download_table.status = DownloadStatus.DOWNLOADING
                         db.commit()
                         download.status = DownloadStatus.DOWNLOADING
-                        print(f"✅ Started NZB download: {download_table.id}")
+                        logger.info(f"✅ Started NZB download: {download_table.id}")
                     else:
                         download_table.status = DownloadStatus.FAILED
                         download_table.error_message = "Failed to start NZB download"
@@ -233,7 +234,7 @@ class DownloadService:
                         download.status = DownloadStatus.FAILED
                         download.error_message = "Failed to start NZB download"
                 except Exception as e:
-                    print(f"❌ Error starting NZB download: {e}")
+                    logger.error(f"❌ Error starting NZB download: {e}")
                     download_table.status = DownloadStatus.FAILED
                     download_table.error_message = str(e)
                     db.commit()
@@ -561,7 +562,7 @@ class DownloadService:
             
             return True
         except Exception as e:
-            print(f"Error restarting download {download_id}: {e}")
+            logger.error(f"Error restarting download {download_id}: {e}")
             return False
 
     async def cleanup_invalid_downloads(self) -> Dict[str, int]:

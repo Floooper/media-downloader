@@ -1,97 +1,80 @@
-import React, { Component, ReactNode } from 'react';
-import {
-    Alert,
-    Button,
-    Stack,
-    Text,
-    Title,
-    Code,
-    Container,
-    Paper,
-} from '@mantine/core';
-import { IconAlertTriangle, IconRefresh } from '@tabler/icons-react';
+import React from 'react';
+import { Box, Typography, Button, Paper } from '@mui/material';
+import { logError } from '../utils/logger';
 
 interface Props {
-    children: ReactNode;
+  children: React.ReactNode;
 }
 
 interface State {
-    hasError: boolean;
-    error?: Error;
-    errorInfo?: string;
+  hasError: boolean;
+  error: Error | null;
+  errorInfo: React.ErrorInfo | null;
 }
 
-export class ErrorBoundary extends Component<Props, State> {
-    constructor(props: Props) {
-        super(props);
-        this.state = { hasError: false };
+class ErrorBoundary extends React.Component<Props, State> {
+  public state: State = {
+    hasError: false,
+    error: null,
+    errorInfo: null,
+  };
+
+  public static getDerivedStateFromError(error: Error): State {
+    return { hasError: true, error, errorInfo: null };
+  }
+
+  public componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    logError('React Error Boundary caught an error', {
+      error,
+      componentStack: errorInfo.componentStack,
+    });
+  }
+
+  private handleReset = () => {
+    this.setState({ hasError: false, error: null, errorInfo: null });
+  };
+
+  public render() {
+    if (this.state.hasError) {
+      return (
+        <Box
+          display="flex"
+          justifyContent="center"
+          alignItems="center"
+          minHeight="100vh"
+          p={2}
+        >
+          <Paper elevation={3} sx={{ p: 3, maxWidth: 600 }}>
+            <Typography variant="h5" color="error" gutterBottom>
+              Something went wrong
+            </Typography>
+            <Typography variant="body1" gutterBottom>
+              The application encountered an unexpected error. Our team has been notified.
+            </Typography>
+            {process.env.NODE_ENV === 'development' && (
+              <Box mt={2} mb={2}>
+                <Typography variant="body2" component="pre" sx={{ 
+                  whiteSpace: 'pre-wrap',
+                  backgroundColor: '#f5f5f5',
+                  p: 2,
+                  borderRadius: 1
+                }}>
+                  {this.state.error?.toString()}
+                </Typography>
+              </Box>
+            )}
+            <Box mt={2}>
+              <Button variant="contained" onClick={this.handleReset}>
+                Try Again
+              </Button>
+            </Box>
+          </Paper>
+        </Box>
+      );
     }
 
-    static getDerivedStateFromError(error: Error): State {
-        return {
-            hasError: true,
-            error,
-        };
-    }
-
-    componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
-        console.error('ErrorBoundary caught an error:', error, errorInfo);
-        this.setState({
-            error,
-            errorInfo: errorInfo.componentStack,
-        });
-    }
-
-    handleReset = () => {
-        this.setState({ hasError: false, error: undefined, errorInfo: undefined });
-        window.location.reload();
-    };
-
-    render() {
-        if (this.state.hasError) {
-            return (
-                <Container size="md" py="xl">
-                    <Paper p="xl" radius="md" withBorder>
-                        <Stack spacing="md" align="center">
-                            <IconAlertTriangle size={48} c="red" />
-                            <Title order={2} c="red">
-                                Something went wrong
-                            </Title>
-                            
-                            <Text align="center" c="dimmed">
-                                An unexpected error occurred. Please try refreshing the page or contact support if the problem persists.
-                            </Text>
-
-                            {this.state.error && (
-                                <Alert c="red" icon={<IconAlertTriangle size={16} />}>
-                                    <Text fw={500}>Error Details:</Text>
-                                    <Code>{this.state.error.message}</Code>
-                                </Alert>
-                            )}
-
-                            <Button
-                                leftSection={<IconRefresh size={16} />}
-                                onClick={this.handleReset}
-                                c="blue"
-                            >
-                                Refresh Page
-                            </Button>
-
-                            {process.env.NODE_ENV === 'development' && this.state.errorInfo && (
-                                <details style={{ width: '100%' }}>
-                                    <summary>Stack Trace (Development Only)</summary>
-                                    <Code block mt="sm">
-                                        {this.state.errorInfo}
-                                    </Code>
-                                </details>
-                            )}
-                        </Stack>
-                    </Paper>
-                </Container>
-            );
-        }
-
-        return this.props.children;
-    }
+    return this.props.children;
+  }
 }
 
+export default ErrorBoundary;

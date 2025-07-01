@@ -1,47 +1,57 @@
-export interface Download {
-    id: number;
-    name: string;
-    size: number;
-    progress: number;
-    status: DownloadStatus;
-    path: string;
-    created_at: string;
-    updated_at: string;
-    tags: Tag[];
+export enum MediaManagerType {
+  SONARR = 'sonarr',
+  RADARR = 'radarr',
+  READARR = 'readarr',
+  LIDARR = 'lidarr'
 }
 
-export enum DownloadStatus {
-    QUEUED = 'queued',
-    DOWNLOADING = 'downloading',
-    PAUSED = 'paused',
-    COMPLETED = 'completed',
-    FAILED = 'failed',
-    CANCELLED = 'cancelled'
+export interface MediaManagerCategory {
+  id: number;
+  name: string;
+  type: string;
 }
 
-export interface Tag {
-    id: number;
-    name: string;
-    created_at: string;
-    updated_at: string;
+export interface MediaManagerRootFolder {
+  id: number;
+  path: string;
+  accessible: boolean;
+  freeSpace?: number;
 }
 
-export interface SystemStatus {
-    usenet: {
-        connected: boolean;
-        max_connections: number;
-        active_connections: number;
-        download_rate: number;
-    };
-    downloads: {
-        active: number;
-        queued: number;
-        completed: number;
-        failed: number;
-    };
-    system: {
-        cpu_usage: number;
-        memory_usage: number;
-        disk_usage: number;
-    };
+export interface MediaManagerQualityProfile {
+  id: number;
+  name: string;
+  default: boolean;
+  upgrades: boolean;
+  cutoff: number;
+}
+
+export interface MediaManagerConfig {
+  url: string;
+  api_key: string;
+  enabled: boolean;
+}
+
+export interface MediaManagerDiscovery {
+  name: string;
+  type: MediaManagerType;
+  url: string;
+}
+
+export interface MediaManagerStatus {
+  health: 'ok' | 'warning' | 'error';
+  version: string;
+  startTime: string;
+  uptime: string;
+}
+
+export interface DownloadStatus {
+  id: number;
+  name: string;
+  status: string;
+  progress: number;
+  size: number;
+  speed: number;
+  eta: string;
+  files: string[];
 }

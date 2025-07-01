@@ -1,0 +1,7 @@
+Package: media-downloader
+Version: 0.1.0
+Platform: Ubuntu 24.04
+Python: 3.12+
+Node.js: 18+
+Created: 2025-06-16 16:13:11 UTC
+Created-by: amanda@Amandas-MacBook-Pro.local

@@ -36,56 +36,27 @@ import {
     IconActivity,
 } from '@tabler/icons-react';
 import { showNotification } from '@mantine/notifications';
-import { mediaManagerService } from '../services/api';
-
-interface SystemInfo {
-    version: string;
-    uptime: string;
-    api_host: string;
-    api_port: number;
-    download_clients: {
-        transmission_url: string;
-        config_endpoint: string;
-    };
-    supported_formats: string[];
-    active_connections: number;
-}
-
-interface ClientConfig {
-    transmission: {
-        name: string;
-        host: string;
-        port: number;
-        url_base: string;
-        full_url: string;
-        instructions: {
-            readarr: string[];
-            sonarr: string[];
-            radarr: string[];
-        };
-    };
-    json_config: {
-        readarr: any;
-        sonarr: any;
-        radarr: any;
-    };
-}
+import {
+    SystemInfo,
+    ClientConfig,
+    MediaManagerApp,
+} from '../types/system';
 
 export function SystemSettings() {
     const [systemInfo, setSystemInfo] = useState<SystemInfo | null>(null);
     const [clientConfig, setClientConfig] = useState<ClientConfig | null>(null);
     const [loading, setLoading] = useState(true);
-    const [activeTab, setActiveTab] = useState<string | null>('overview');
+    const [activeTab, setActiveTab] = useState<string>('overview');
 
     useEffect(() => {
-        fetchSystemInfo();
-        fetchClientConfig();
+        void fetchSystemInfo();
+        void fetchClientConfig();
     }, []);
 
     const fetchSystemInfo = async () => {
         try {
             const response = await fetch('http://localhost:8000/api/system/info');
-            const info = await response.json();
+            const info = await response.json() as SystemInfo;
             setSystemInfo(info);
         } catch (error) {
             console.error('Failed to fetch system info:', error);
@@ -106,13 +77,10 @@ export function SystemSettings() {
     };
 
     const fetchClientConfig = async () => {
-        console.log("=== FETCHING CLIENT CONFIG ===");
         try {
             const response = await fetch('http://localhost:8000/api/transmission/client-config');
-            const config = await response.json();
-            console.log("=== CLIENT CONFIG RECEIVED ===", config);
+            const config = await response.json() as ClientConfig;
             setClientConfig(config);
-            console.log("=== CLIENT CONFIG SET ===", config);
         } catch (error) {
             console.error('Failed to fetch client config:', error);
             showNotification({
@@ -125,44 +93,34 @@ export function SystemSettings() {
         }
     };
 
-    const copyToClipboard = (text: string, label: string) => {
-        navigator.clipboard.writeText(text);
-        showNotification({
-            title: 'Copied!',
-            message: `${label} copied to clipboard`,
-            color: 'green',
-            icon: <IconCheck size={16} />,
-        });
-    };
-
     const renderSystemOverview = () => (
         <Stack spacing="lg">
             <Card shadow="sm" padding="lg">
                 <Group justify="space-between" mb="md">
                     <Group>
-                        <ThemeIcon c="blue" size="lg">
+                        <ThemeIcon color="blue" size="lg">
                             <IconServer size={20} />
                         </ThemeIcon>
                         <Title order={3}>System Information</Title>
                     </Group>
-                    <Badge c="green">Online</Badge>
+                    <Badge color="green">Online</Badge>
                 </Group>
                 
                 <Grid>
                     <Grid.Col span={6}>
-                        <Text size="sm" c="dimmed">Version</Text>
+                        <Text size="sm" color="dimmed">Version</Text>
                         <Text fw={500}>{systemInfo?.version}</Text>
                     </Grid.Col>
                     <Grid.Col span={6}>
-                        <Text size="sm" c="dimmed">Uptime</Text>
+                        <Text size="sm" color="dimmed">Uptime</Text>
                         <Text fw={500}>{systemInfo?.uptime}</Text>
                     </Grid.Col>
                     <Grid.Col span={6}>
-                        <Text size="sm" c="dimmed">API Host</Text>
+                        <Text size="sm" color="dimmed">API Host</Text>
                         <Text fw={500}>{systemInfo?.api_host}:{systemInfo?.api_port}</Text>
                     </Grid.Col>
                     <Grid.Col span={6}>
-                        <Text size="sm" c="dimmed">Active Connections</Text>
+                        <Text size="sm" color="dimmed">Active Connections</Text>
                         <Text fw={500}>{systemInfo?.active_connections}</Text>
                     </Grid.Col>
                 </Grid>
@@ -170,7 +128,7 @@ export function SystemSettings() {
 
             <Card shadow="sm" padding="lg">
                 <Group mb="md">
-                    <ThemeIcon c="grape" size="lg">
+                    <ThemeIcon color="grape" size="lg">
                         <IconDownload size={20} />
                     </ThemeIcon>
                     <Title order={3}>Download Capabilities</Title>
@@ -181,7 +139,7 @@ export function SystemSettings() {
                     size="sm"
                     center
                     icon={
-                        <ThemeIcon c="teal" size={24} radius="xl">
+                        <ThemeIcon color="teal" size={24} radius="xl">
                             <IconCheck size={16} />
                         </ThemeIcon>
                     }
@@ -194,7 +152,7 @@ export function SystemSettings() {
 
             <Card shadow="sm" padding="lg">
                 <Group mb="md">
-                    <ThemeIcon c="orange" size="lg">
+                    <ThemeIcon color="orange" size="lg">
                         <IconActivity size={20} />
                     </ThemeIcon>
                     <Title order={3}>API Endpoints</Title>
@@ -219,36 +177,37 @@ export function SystemSettings() {
     );
 
     const renderDownloadClientConfig = () => {
-        console.log("=== RENDERING CLIENT CONFIG ===", clientConfig);
         if (!clientConfig) return <Text>Loading configuration...</Text>;
+
+        const mediaManagerApps: MediaManagerApp[] = ['readarr', 'sonarr', 'radarr'];
 
         return (
             <Stack spacing="lg">
-                <Alert icon={<IconInfoCircle size={16} />} title="Download Client Integration" c="blue">
+                <Alert icon={<IconInfoCircle size={16} />} title="Download Client Integration" color="blue">
                     Use these settings to configure media managers (Readarr, Sonarr, Radarr) to use this application as a download client.
                 </Alert>
 
                 <Tabs defaultValue="readarr">
                     <Tabs.List>
-                        <Tabs.Tab value="readarr" icon={<IconDatabase size={14} />}>Readarr</Tabs.Tab>
-                        <Tabs.Tab value="sonarr" icon={<IconCloudDownload size={14} />}>Sonarr</Tabs.Tab>
-                        <Tabs.Tab value="radarr" icon={<IconCloudDownload size={14} />}>Radarr</Tabs.Tab>
+                        <Tabs.Tab value="readarr" leftSection={<IconDatabase size={14} />}>Readarr</Tabs.Tab>
+                        <Tabs.Tab value="sonarr" leftSection={<IconCloudDownload size={14} />}>Sonarr</Tabs.Tab>
+                        <Tabs.Tab value="radarr" leftSection={<IconCloudDownload size={14} />}>Radarr</Tabs.Tab>
                     </Tabs.List>
 
-                    {['readarr', 'sonarr', 'radarr'].map((app) => (
+                    {mediaManagerApps.map((app) => (
                         <Tabs.Panel key={app} value={app} pt="xs">
                             <Stack spacing="md">
                                 <Card shadow="sm" padding="md">
                                     <Title order={4} mb="md">Manual Configuration</Title>
                                     <Grid>
                                         <Grid.Col span={6}>
-                                            <Text size="sm" c="dimmed">Name</Text>
+                                            <Text size="sm" color="dimmed">Name</Text>
                                             <Group spacing="xs">
                                                 <Code>{clientConfig.transmission.name}</Code>
                                                 <CopyButton value={clientConfig.transmission.name}>
                                                     {({ copied, copy }) => (
                                                         <Tooltip label={copied ? 'Copied' : 'Copy'}>
-                                                            <ActionIcon c={copied ? 'teal' : 'gray'} onClick={copy}>
+                                                            <ActionIcon color={copied ? 'teal' : 'gray'} onClick={copy}>
                                                                 {copied ? <IconCheck size={16} /> : <IconCopy size={16} />}
                                                             </ActionIcon>
                                                         </Tooltip>
@@ -257,17 +216,17 @@ export function SystemSettings() {
                                             </Group>
                                         </Grid.Col>
                                         <Grid.Col span={6}>
-                                            <Text size="sm" c="dimmed">Implementation</Text>
+                                            <Text size="sm" color="dimmed">Implementation</Text>
                                             <Code>Transmission</Code>
                                         </Grid.Col>
                                         <Grid.Col span={6}>
-                                            <Text size="sm" c="dimmed">Host</Text>
+                                            <Text size="sm" color="dimmed">Host</Text>
                                             <Group spacing="xs">
                                                 <Code>{clientConfig.transmission.host}</Code>
                                                 <CopyButton value={clientConfig.transmission.host}>
                                                     {({ copied, copy }) => (
                                                         <Tooltip label={copied ? 'Copied' : 'Copy'}>
-                                                            <ActionIcon c={copied ? 'teal' : 'gray'} onClick={copy}>
+                                                            <ActionIcon color={copied ? 'teal' : 'gray'} onClick={copy}>
                                                                 {copied ? <IconCheck size={16} /> : <IconCopy size={16} />}
                                                             </ActionIcon>
                                                         </Tooltip>
@@ -276,13 +235,13 @@ export function SystemSettings() {
                                             </Group>
                                         </Grid.Col>
                                         <Grid.Col span={6}>
-                                            <Text size="sm" c="dimmed">Port</Text>
+                                            <Text size="sm" color="dimmed">Port</Text>
                                             <Group spacing="xs">
                                                 <Code>{clientConfig.transmission.port}</Code>
                                                 <CopyButton value={clientConfig.transmission.port.toString()}>
                                                     {({ copied, copy }) => (
                                                         <Tooltip label={copied ? 'Copied' : 'Copy'}>
-                                                            <ActionIcon c={copied ? 'teal' : 'gray'} onClick={copy}>
+                                                            <ActionIcon color={copied ? 'teal' : 'gray'} onClick={copy}>
                                                                 {copied ? <IconCheck size={16} /> : <IconCopy size={16} />}
                                                             </ActionIcon>
                                                         </Tooltip>
@@ -291,13 +250,13 @@ export function SystemSettings() {
                                             </Group>
                                         </Grid.Col>
                                         <Grid.Col span={12}>
-                                            <Text size="sm" c="dimmed">URL Base</Text>
+                                            <Text size="sm" color="dimmed">URL Base</Text>
                                             <Group spacing="xs">
                                                 <Code>{clientConfig.transmission.url_base}</Code>
                                                 <CopyButton value={clientConfig.transmission.url_base}>
                                                     {({ copied, copy }) => (
                                                         <Tooltip label={copied ? 'Copied' : 'Copy'}>
-                                                            <ActionIcon c={copied ? 'teal' : 'gray'} onClick={copy}>
+                                                            <ActionIcon color={copied ? 'teal' : 'gray'} onClick={copy}>
                                                                 {copied ? <IconCheck size={16} /> : <IconCopy size={16} />}
                                                             </ActionIcon>
                                                         </Tooltip>
@@ -306,13 +265,13 @@ export function SystemSettings() {
                                             </Group>
                                         </Grid.Col>
                                         <Grid.Col span={12}>
-                                            <Text size="sm" c="dimmed">Category</Text>
+                                            <Text size="sm" color="dimmed">Category</Text>
                                             <Group spacing="xs">
                                                 <Code>{app}</Code>
                                                 <CopyButton value={app}>
                                                     {({ copied, copy }) => (
                                                         <Tooltip label={copied ? 'Copied' : 'Copy'}>
-                                                            <ActionIcon c={copied ? 'teal' : 'gray'} onClick={copy}>
+                                                            <ActionIcon color={copied ? 'teal' : 'gray'} onClick={copy}>
                                                                 {copied ? <IconCheck size={16} /> : <IconCopy size={16} />}
                                                             </ActionIcon>
                                                         </Tooltip>
@@ -339,7 +298,7 @@ export function SystemSettings() {
                                             <CopyButton value={clientConfig.transmission.full_url}>
                                                 {({ copied, copy }) => (
                                                     <Tooltip label={copied ? 'Copied' : 'Copy'}>
-                                                        <ActionIcon c={copied ? 'teal' : 'gray'} onClick={copy}>
+                                                        <ActionIcon color={copied ? 'teal' : 'gray'} onClick={copy}>
                                                             {copied ? <IconCheck size={16} /> : <IconCopy size={16} />}
                                                         </ActionIcon>
                                                     </Tooltip>
@@ -352,7 +311,7 @@ export function SystemSettings() {
                                 <Card shadow="sm" padding="md">
                                     <Title order={4} mb="md">Step-by-Step Instructions</Title>
                                     <List size="sm" spacing="xs">
-                                        {clientConfig.transmission.instructions[app as keyof typeof clientConfig.transmission.instructions].map((step, index) => (
+                                        {clientConfig.transmission.instructions[app].map((step, index) => (
                                             <List.Item key={index}>{step}</List.Item>
                                         ))}
                                     </List>
@@ -365,8 +324,8 @@ export function SystemSettings() {
                                         </Accordion.Control>
                                         <Accordion.Panel>
                                             <Group justify="space-between" mb="xs">
-                                                <Text size="sm" c="dimmed">Use this JSON for API-based configuration</Text>
-                                                <CopyButton value={JSON.stringify(clientConfig.json_config[app as keyof typeof clientConfig.json_config], null, 2)}>
+                                                <Text size="sm" color="dimmed">Use this JSON for API-based configuration</Text>
+                                                <CopyButton value={JSON.stringify(clientConfig.json_config[app], null, 2)}>
                                                     {({ copied, copy }) => (
                                                         <Button
                                                             size="xs"
@@ -380,7 +339,7 @@ export function SystemSettings() {
                                                 </CopyButton>
                                             </Group>
                                             <Code block>
-                                                {JSON.stringify(clientConfig.json_config[app as keyof typeof clientConfig.json_config], null, 2)}
+                                                {JSON.stringify(clientConfig.json_config[app], null, 2)}
                                             </Code>
                                         </Accordion.Panel>
                                     </Accordion.Item>
@@ -397,7 +356,7 @@ export function SystemSettings() {
         <Stack spacing="lg">
             <Card shadow="sm" padding="lg">
                 <Title order={3} mb="md">Application Settings</Title>
-                <Text c="dimmed" mb="md">
+                <Text color="dimmed" mb="md">
                     Configure global application settings and preferences.
                 </Text>
                 
@@ -405,7 +364,7 @@ export function SystemSettings() {
                     <Group justify="space-between">
                         <div>
                             <Text size="sm" fw={500}>Default Download Path</Text>
-                            <Text size="xs" c="dimmed">Default location for new downloads</Text>
+                            <Text size="xs" color="dimmed">Default location for new downloads</Text>
                         </div>
                         <Code>./downloads</Code>
                     </Group>
@@ -413,7 +372,7 @@ export function SystemSettings() {
                     <Group justify="space-between">
                         <div>
                             <Text size="sm" fw={500}>Max Concurrent Downloads</Text>
-                            <Text size="xs" c="dimmed">Maximum number of simultaneous downloads</Text>
+                            <Text size="xs" color="dimmed">Maximum number of simultaneous downloads</Text>
                         </div>
                         <Badge>5</Badge>
                     </Group>
@@ -421,56 +380,56 @@ export function SystemSettings() {
                     <Group justify="space-between">
                         <div>
                             <Text size="sm" fw={500}>Auto-tag Downloads</Text>
-                            <Text size="xs" c="dimmed">Automatically assign tags based on patterns</Text>
+                            <Text size="xs" color="dimmed">Automatically assign tags based on patterns</Text>
                         </div>
-                        <Badge c="green">Enabled</Badge>
+                        <Badge color="green">Enabled</Badge>
                     </Group>
                     
                     <Group justify="space-between">
                         <div>
                             <Text size="sm" fw={500}>Cleanup Completed</Text>
-                            <Text size="xs" c="dimmed">Remove completed downloads from queue</Text>
+                            <Text size="xs" color="dimmed">Remove completed downloads from queue</Text>
                         </div>
-                        <Badge c="orange">Disabled</Badge>
+                        <Badge color="orange">Disabled</Badge>
                     </Group>
                 </Stack>
             </Card>
             
             <Card shadow="sm" padding="lg">
                 <Title order={3} mb="md">Media Manager Integration</Title>
-                <Text c="dimmed" mb="md">
+                <Text color="dimmed" mb="md">
                     Status of connected media management applications.
                 </Text>
                 
                 <Stack spacing="sm">
                     <Group justify="space-between">
                         <Group>
-                            <ThemeIcon c="blue" size="sm">
+                            <ThemeIcon color="blue" size="sm">
                                 <IconDatabase size={12} />
                             </ThemeIcon>
                             <Text size="sm">Readarr</Text>
                         </Group>
-                        <Badge c="green">Connected</Badge>
+                        <Badge color="green">Connected</Badge>
                     </Group>
                     
                     <Group justify="space-between">
                         <Group>
-                            <ThemeIcon c="grape" size="sm">
+                            <ThemeIcon color="grape" size="sm">
                                 <IconCloudDownload size={12} />
                             </ThemeIcon>
                             <Text size="sm">Sonarr</Text>
                         </Group>
-                        <Badge c="gray">Not Configured</Badge>
+                        <Badge color="gray">Not Configured</Badge>
                     </Group>
                     
                     <Group justify="space-between">
                         <Group>
-                            <ThemeIcon c="red" size="sm">
+                            <ThemeIcon color="red" size="sm">
                                 <IconCloudDownload size={12} />
                             </ThemeIcon>
                             <Text size="sm">Radarr</Text>
                         </Group>
-                        <Badge c="gray">Not Configured</Badge>
+                        <Badge color="gray">Not Configured</Badge>
                     </Group>
                 </Stack>
             </Card>
@@ -495,11 +454,11 @@ export function SystemSettings() {
                 </Badge>
             </Group>
 
-            <Tabs value={activeTab} onTabChange={setActiveTab}>
+            <Tabs value={activeTab} onChange={setActiveTab}>
                 <Tabs.List>
-                    <Tabs.Tab value="overview" icon={<IconServer size={14} />}>Overview</Tabs.Tab>
-                    <Tabs.Tab value="download-client" icon={<IconCloud size={14} />}>Download Client</Tabs.Tab>
-                    <Tabs.Tab value="settings" icon={<IconSettings size={14} />}>Settings</Tabs.Tab>
+                    <Tabs.Tab value="overview" leftSection={<IconServer size={14} />}>Overview</Tabs.Tab>
+                    <Tabs.Tab value="download-client" leftSection={<IconCloud size={14} />}>Download Client</Tabs.Tab>
+                    <Tabs.Tab value="settings" leftSection={<IconSettings size={14} />}>Settings</Tabs.Tab>
                 </Tabs.List>
 
                 <Tabs.Panel value="overview" pt="xs">
@@ -517,4 +476,3 @@ export function SystemSettings() {
         </Stack>
     );
 }
-

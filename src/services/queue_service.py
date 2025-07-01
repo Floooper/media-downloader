@@ -2,7 +2,7 @@ import asyncio
 from typing import List, Optional, Dict
 from datetime import datetime
 from ..models.tables import DownloadTable as Download, DownloadStatus, DownloadType
-from ..config import settings
+from ..config import config
 
 class QueueManager:
     def __init__(self):

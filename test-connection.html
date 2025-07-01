@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>API Connection Test</title>
+</head>
+<body>
+    <h1>Media Downloader API Test</h1>
+    <button onclick="testAPI()">Test API Connection</button>
+    <div id="results"></div>
+    
+    <script>
+        async function testAPI() {
+            const results = document.getElementById('results');
+            results.innerHTML = '<p>Testing...</p>';
+            
+            try {
+                console.log('Testing API connection to http://localhost:8000/api/downloads/');
+                const response = await fetch('http://localhost:8000/api/downloads/');
+                const data = await response.json();
+                
+                results.innerHTML = `
+                    <h2>✅ Success!</h2>
+                    <p>Status: ${response.status}</p>
+                    <p>Downloads found: ${data.length}</p>
+                    <pre>${JSON.stringify(data, null, 2)}</pre>
+                `;
+            } catch (error) {
+                results.innerHTML = `
+                    <h2>❌ Error!</h2>
+                    <p>Error: ${error.message}</p>
+                `;
+            }
+        }
+    </script>
+</body>
+</html>

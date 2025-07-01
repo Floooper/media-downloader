@@ -72,11 +72,11 @@ class ServicesManager:
             
             # Log the configuration being used (mask password)
             masked_password = "***" if settings.USENET_PASSWORD else "(empty)"
-            print(f"🔧 NZB downloader initialized with current settings:")
-            print(f"   Server: {settings.USENET_SERVER}:{settings.USENET_PORT}")
-            print(f"   SSL: {settings.USENET_SSL}")
-            print(f"   Username: {settings.USENET_USERNAME}")
-            print(f"   Password: {masked_password}")
+            logger.info(f"🔧 NZB downloader initialized with current settings:")
+            logger.info(f"   Server: {settings.USENET_SERVER}:{settings.USENET_PORT}")
+            logger.info(f"   SSL: {settings.USENET_SSL}")
+            logger.info(f"   Username: {settings.USENET_USERNAME}")
+            logger.info(f"   Password: {masked_password}")
             
         return self._nzb_downloader
 

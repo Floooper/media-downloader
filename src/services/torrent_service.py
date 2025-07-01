@@ -1,3 +1,4 @@
+import logging\n\nlogger = logging.getLogger(__name__)\n
 """
 Real Torrent Service using libtorrent-python
 """
@@ -11,10 +12,10 @@ from datetime import datetime
 try:
     import libtorrent as lt
     LIBTORRENT_AVAILABLE = True
-    print("✅ Using real libtorrent implementation")
+    logger.info(" Using real libtorrent implementation")
 except ImportError:
     LIBTORRENT_AVAILABLE = False
-    print("❌ libtorrent not available, falling back to mock implementation")
+    logger.error(" libtorrent not available, falling back to mock implementation")
 
 @dataclass
 class TorrentFile:
@@ -43,10 +44,10 @@ class TorrentDownloader:
                  listen_port: int = 6881):
         
         if LIBTORRENT_AVAILABLE:
-            print("✅ Initializing real libtorrent downloader")
+            logger.info(" Initializing real libtorrent downloader")
             self._init_libtorrent(max_connections_per_torrent, max_upload_rate, max_download_rate, listen_port)
         else:
-            print("WARNING: Using mock torrent downloader. Install libtorrent for real functionality.")
+            logger.warning(": Using mock torrent downloader. Install libtorrent for real functionality.")
             self._init_mock()
     
     def _init_libtorrent(self, max_connections_per_torrent, max_upload_rate, max_download_rate, listen_port):

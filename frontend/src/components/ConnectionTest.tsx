@@ -19,14 +19,14 @@ const ConnectionTest: React.FC = () => {
         setStatus('error');
         setMessage(`Connection failed: ${response.status}`);
       }
-    } catch (error) {
+    } catch {
       setStatus('error');
       setMessage('Connection failed: Unable to reach backend');
     }
   };
 
   useEffect(() => {
-    testConnection();
+    void testConnection();
   }, []);
 
   return (
@@ -36,7 +36,7 @@ const ConnectionTest: React.FC = () => {
         <Button
           size="small"
           startIcon={<RefreshIcon />}
-          onClick={testConnection}
+          onClick={() => void testConnection()}
           disabled={status === 'loading'}
         >
           Test

@@ -4,13 +4,11 @@ import {
     Group,
     Stack,
     Progress,
-    ActionIcon,
     Menu,
     Button,
     Collapse,
     SimpleGrid,
     Table,
-    NumberInput,
     UnstyledButton,
     Box,
 } from '@mantine/core';
@@ -158,7 +156,7 @@ export function TorrentDetails({ download, onSetPriority }: TorrentDetailsProps)
                                                 value={file.progress}
                                                 label={`${Math.round(file.progress)}%`}
                                                 size="sm"
-                                                c={file.priority === 0 ? 'gray' : 'blue'}
+                                                color={file.priority === 0 ? 'gray' : 'blue'}
                                             />
                                         </Table.Td>
                                         <Table.Td>
@@ -166,7 +164,7 @@ export function TorrentDetails({ download, onSetPriority }: TorrentDetailsProps)
                                                 <Menu.Target>
                                                     <Button
                                                         variant="light"
-                                                        c={getPriorityColor(file.priority)}
+                                                        color={getPriorityColor(file.priority)}
                                                         size="xs"
                                                         compact
                                                     >
@@ -177,7 +175,7 @@ export function TorrentDetails({ download, onSetPriority }: TorrentDetailsProps)
                                                     <Menu.Item onClick={() => onSetPriority(index, 7)}>Maximum</Menu.Item>
                                                     <Menu.Item onClick={() => onSetPriority(index, 4)}>High</Menu.Item>
                                                     <Menu.Item onClick={() => onSetPriority(index, 1)}>Normal</Menu.Item>
-                                                    <Menu.Item onClick={() => onSetPriority(index, 0)} c="red">Skip</Menu.Item>
+                                                    <Menu.Item onClick={() => onSetPriority(index, 0)} color="red">Skip</Menu.Item>
                                                 </Menu.Dropdown>
                                             </Menu>
                                         </Table.Td>
@@ -191,4 +189,3 @@ export function TorrentDetails({ download, onSetPriority }: TorrentDetailsProps)
         </Card>
     );
 }
-

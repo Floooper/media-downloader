@@ -4,7 +4,7 @@ from datetime import datetime
 from ..models.download import Tag, Download
 from ..models.tables import TagTable, download_tags
 from ..database import SessionLocal
-from ..config import settings
+from ..config import config
 import os
 from sqlalchemy.orm import joinedload
 

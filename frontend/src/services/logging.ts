@@ -1,44 +1,62 @@
-// Log levels
 export enum LogLevel {
-    DEBUG = 'debug',
-    INFO = 'info',
-    WARN = 'warn',
-    ERROR = 'error'
+  DEBUG = 'debug',
+  INFO = 'info',
+  WARNING = 'warning',
+  ERROR = 'error'
 }
 
-// Interface for structured log messages
-interface LogMessage {
-    level: LogLevel;
-    message: string;
-    timestamp: string;
-    data?: any;
+export type LogDetails = unknown;
+
+export interface LogEntry {
+  timestamp: Date;
+  level: LogLevel;
+  message: string;
+  details?: LogDetails;
 }
 
-// Function to create a log message
-const createLogMessage = (level: LogLevel, message: string, data?: any): LogMessage => ({
-    level,
-    message,
-    timestamp: new Date().toISOString(),
-    data
-});
+class Logger {
+  private logs: LogEntry[] = [];
+  private maxEntries = 1000;
 
-// Log functions
-export const logDebug = (message: string, data?: any) => {
-    const logMessage = createLogMessage(LogLevel.DEBUG, message, data);
-    console.debug(message, data);
-};
+  debug(message: string, details?: LogDetails) {
+    this.log(LogLevel.DEBUG, message, details);
+  }
 
-export const logInfo = (message: string, data?: any) => {
-    const logMessage = createLogMessage(LogLevel.INFO, message, data);
-    console.info(message, data);
-};
+  info(message: string, details?: LogDetails) {
+    this.log(LogLevel.INFO, message, details);
+  }
 
-export const logWarn = (message: string, data?: any) => {
-    const logMessage = createLogMessage(LogLevel.WARN, message, data);
-    console.warn(message, data);
-};
+  warning(message: string, details?: LogDetails) {
+    this.log(LogLevel.WARNING, message, details);
+  }
 
-export const logError = (message: string, error?: any) => {
-    const logMessage = createLogMessage(LogLevel.ERROR, message, error);
-    console.error(message, error);
-};
+  error(message: string, details?: LogDetails) {
+    this.log(LogLevel.ERROR, message, details);
+  }
+
+  private log(level: LogLevel, message: string, details?: LogDetails) {
+    const entry: LogEntry = {
+      timestamp: new Date(),
+      level,
+      message,
+      details
+    };
+
+    this.logs.unshift(entry);
+
+    if (this.logs.length > this.maxEntries) {
+      this.logs.pop();
+    }
+  }
+
+  getLogs(): LogEntry[] {
+    return this.logs;
+  }
+
+  clearLogs(): void {
+    this.logs = [];
+  }
+}
+
+const logger = new Logger();
+export default logger;

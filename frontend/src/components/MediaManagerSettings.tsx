@@ -15,17 +15,29 @@ import {
 } from '@mantine/core';
 import { showNotification } from '@mantine/notifications';
 import { mediaManagerService } from '../services/api';
-import { MediaManagerType } from '../types/api';
+import {
+    MediaManagerType,
+    MediaManagerCategory,
+    MediaManagerRootFolder,
+    MediaManagerQualityProfile,
+    MediaManagerDiscovery,
+    MediaManagerStatus,
+    MediaManagerConfig,
+} from '../types/api';
+
+interface ConfigForm extends Omit<MediaManagerConfig, 'api_key'> {
+    apiKey: string;
+}
 
 export function MediaManagerSettings() {
     const [selectedManager, setSelectedManager] = useState<MediaManagerType | null>(null);
-    const [categories, setCategories] = useState<any[]>([]);
-    const [rootFolders, setRootFolders] = useState<any[]>([]);
-    const [qualityProfiles, setQualityProfiles] = useState<any[]>([]);
+    const [categories, setCategories] = useState<MediaManagerCategory[]>([]);
+    const [rootFolders, setRootFolders] = useState<MediaManagerRootFolder[]>([]);
+    const [qualityProfiles, setQualityProfiles] = useState<MediaManagerQualityProfile[]>([]);
     const [loading, setLoading] = useState(false);
-    const [managerStatus, setManagerStatus] = useState<Record<string, any>>({});
-    const [discoveredManagers, setDiscoveredManagers] = useState<any[]>([]);
-    const [configForm, setConfigForm] = useState({
+    const [managerStatus, setManagerStatus] = useState<Record<MediaManagerType, MediaManagerStatus | undefined>>({} as Record<MediaManagerType, MediaManagerStatus | undefined>);
+    const [discoveredManagers, setDiscoveredManagers] = useState<MediaManagerDiscovery[]>([]);
+    const [configForm, setConfigForm] = useState<ConfigForm>({
         url: '',
         apiKey: '',
         enabled: true,
@@ -50,7 +62,7 @@ export function MediaManagerSettings() {
         }
     }, []);
 
-    const testConnection = async (managerType: MediaManagerType) => {
+    const testConnection = async (managerType: MediaManagerType): Promise<boolean> => {
         setLoading(true);
         try {
             const result = await mediaManagerService.testConnection(managerType, {
@@ -144,7 +156,7 @@ export function MediaManagerSettings() {
 
     useEffect(() => {
         if (selectedManager) {
-            fetchManagerData(selectedManager);
+            void fetchManagerData(selectedManager);
         }
     }, [selectedManager]);
 
@@ -153,7 +165,7 @@ export function MediaManagerSettings() {
             <Group justify="space-between">
                 <Title order={2}>Media Manager Settings</Title>
                 <Button
-                    onClick={discoverManagers}
+                    onClick={() => void discoverManagers()}
                     variant="light"
                     loading={loading}
                 >
@@ -165,14 +177,14 @@ export function MediaManagerSettings() {
                 <Card shadow="sm">
                     <Title order={3}>Discovered Media Managers</Title>
                     <Stack spacing="xs" mt="md">
-                        {discoveredManagers.map((manager, index) => (
-                            <Group key={index} justify="space-between">
+                        {discoveredManagers.map((manager) => (
+                            <Group key={`${manager.type}-${manager.url}`} justify="space-between">
                                 <Text>{manager.name} ({manager.type})</Text>
                                 <Button
                                     size="sm"
                                     variant="light"
                                     onClick={() => {
-                                        setSelectedManager(manager.type as MediaManagerType);
+                                        setSelectedManager(manager.type);
                                         setConfigForm({
                                             ...configForm,
                                             url: manager.url,
@@ -194,7 +206,7 @@ export function MediaManagerSettings() {
                 label="Select Media Manager"
                 placeholder="Choose a media manager"
                 value={selectedManager}
-                onChange={(value: MediaManagerType) => setSelectedManager(value)}
+                onChange={(value: string) => setSelectedManager(value as MediaManagerType)}
                 data={[
                     { value: MediaManagerType.SONARR, label: 'Sonarr (TV Shows)' },
                     { value: MediaManagerType.RADARR, label: 'Radarr (Movies)' },
@@ -241,14 +253,14 @@ export function MediaManagerSettings() {
                             <Group position="right" spacing="sm">
                                 <Button
                                     variant="light"
-                                    onClick={() => testConnection(selectedManager)}
+                                    onClick={() => void testConnection(selectedManager)}
                                     loading={loading}
                                     disabled={!configForm.url || !configForm.apiKey}
                                 >
                                     Test Connection
                                 </Button>
                                 <Button
-                                    onClick={() => handleRegister(selectedManager)}
+                                    onClick={() => void handleRegister(selectedManager)}
                                     loading={loading}
                                     disabled={!configForm.url || !configForm.apiKey}
                                 >
@@ -261,24 +273,24 @@ export function MediaManagerSettings() {
 
                         <Accordion variant="separated">
                             <Accordion.Item value="categories">
-                            <Accordion.Control>
-                                <Group justify="space-between">
-                                    <Group spacing="xs">
-                                        <Text>Download Categories</Text>
-                                        <Badge size="sm">{categories.length}</Badge>
+                                <Accordion.Control>
+                                    <Group justify="space-between">
+                                        <Group spacing="xs">
+                                            <Text>Download Categories</Text>
+                                            <Badge size="sm">{categories.length}</Badge>
+                                        </Group>
+                                        <Badge
+                                            color={managerStatus[selectedManager]?.health === 'ok' ? 'green' : 'yellow'}
+                                            onClick={() => void checkHealth(selectedManager)}
+                                            style={{ cursor: 'pointer' }}
+                                        >
+                                            {managerStatus[selectedManager]?.health || 'unknown'}
+                                        </Badge>
                                     </Group>
-                                    <Badge
-                                        c={managerStatus[selectedManager]?.health === 'ok' ? 'green' : 'yellow'}
-                                        onClick={() => checkHealth(selectedManager)}
-                                        style={{ cursor: 'pointer' }}
-                                    >
-                                        {managerStatus[selectedManager]?.health || 'unknown'}
-                                    </Badge>
-                                </Group>
-                            </Accordion.Control>
+                                </Accordion.Control>
                                 <Accordion.Panel>
                                     <Stack spacing="xs">
-                                        {categories.map((category: any) => (
+                                        {categories.map((category) => (
                                             <Group key={category.id} justify="space-between">
                                                 <Text>{category.name}</Text>
                                                 <Badge>{category.type}</Badge>
@@ -300,7 +312,7 @@ export function MediaManagerSettings() {
                                 </Accordion.Control>
                                 <Accordion.Panel>
                                     <Stack spacing="xs">
-                                        {rootFolders.map((folder: any) => (
+                                        {rootFolders.map((folder) => (
                                             <Text key={folder.id}>{folder.path}</Text>
                                         ))}
                                         {rootFolders.length === 0 && (
@@ -319,7 +331,7 @@ export function MediaManagerSettings() {
                                 </Accordion.Control>
                                 <Accordion.Panel>
                                     <Stack spacing="xs">
-                                        {qualityProfiles.map((profile: any) => (
+                                        {qualityProfiles.map((profile) => (
                                             <Group key={profile.id} justify="space-between">
                                                 <Text>{profile.name}</Text>
                                                 {profile.default && <Badge>Default</Badge>}
@@ -338,4 +350,3 @@ export function MediaManagerSettings() {
         </Stack>
     );
 }
-

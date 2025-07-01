@@ -1,0 +1,38 @@
+# Environment variables and secrets
+.env
+.env.*
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+dist/
+*.egg-info/
+
+# Logs
+*.log
+nohup.out
+
+# Database
+*.db
+downloads/
+data/
+backups/
+
+# Node
+node_modules/
+.next/
+build/
+.DS_Store
+
+# Development files
+*.backup
+*.bak
+*.old
+*.broken
+*.tmp
+
+# Application specific
+*.nzb
+config.json

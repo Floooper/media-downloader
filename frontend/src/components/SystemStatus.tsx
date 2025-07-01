@@ -14,9 +14,10 @@ import {
   Storage as StorageIcon,
 } from '@mui/icons-material';
 import { getSystemStatus } from '../services/api';
+import { SystemStatusData } from '../types/system-status';
 
 const SystemStatus: React.FC = () => {
-  const [status, setStatus] = useState<any>(null);
+  const [status, setStatus] = useState<SystemStatusData | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -25,12 +26,12 @@ const SystemStatus: React.FC = () => {
         const data = await getSystemStatus();
         setStatus(data);
         setError(null);
-      } catch (err) {
+      } catch {
         setError('Failed to fetch system status');
       }
     };
 
-    fetchStatus();
+    void fetchStatus();
     const interval = setInterval(fetchStatus, 5000);
     return () => clearInterval(interval);
   }, []);
@@ -51,7 +52,7 @@ const SystemStatus: React.FC = () => {
     );
   }
 
-  const formatSpeed = (bytesPerSecond: number) => {
+  const formatSpeed = (bytesPerSecond: number): string => {
     if (bytesPerSecond < 1024) return `${bytesPerSecond} B/s`;
     if (bytesPerSecond < 1024 * 1024) return `${(bytesPerSecond / 1024).toFixed(1)} KB/s`;
     return `${(bytesPerSecond / (1024 * 1024)).toFixed(1)} MB/s`;

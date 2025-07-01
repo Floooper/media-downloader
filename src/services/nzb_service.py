@@ -1,3 +1,4 @@
+import re
 import xml.etree.ElementTree as ET
 from io import StringIO
 import logging

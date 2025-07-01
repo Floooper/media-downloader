@@ -22,10 +22,12 @@ nohup uvicorn src.main:app --host 0.0.0.0 --port 8000 --workers 4 > backend.log 
 BACKEND_PID=$!
 echo "Backend started with PID $BACKEND_PID"
 
-# Start frontend in production mode
-print_message "🌐" "Starting frontend production server..."
-cd frontend && npm run build && npm run start > ../frontend.log 2>&1 &
+# Start frontend in development mode temporarily
+print_message "🌐" "Starting frontend server..."
+cd frontend
+nohup npm run dev > ../frontend.log 2>&1 &
 FRONTEND_PID=$!
+cd ..
 echo "Frontend started with PID $FRONTEND_PID"
 
 # Give services a moment to start
@@ -47,7 +49,7 @@ fi
 
 # Print startup message
 echo -e "\n🎉 Production servers started!"
-print_message "📱" "Frontend: http://localhost:3000"
+print_message "📱" "Frontend: http://localhost:5173"
 print_message "🔧" "Backend API: http://localhost:8000"
 
 # Print helpful commands

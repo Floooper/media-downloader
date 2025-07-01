@@ -1,3 +1,4 @@
+import logging\n\nlogger = logging.getLogger(__name__)\n
 import aiohttp
 from typing import Dict, List, Optional
 from enum import Enum
@@ -150,28 +151,28 @@ class MediaManagerIntegration:
             # Test basic API access
             system_status = await self._make_request(manager_type, 'system/status')
             if not system_status:
-                print(f"Cannot access {manager_type.value} API")
+                logger.info(f"Cannot access {manager_type.value} API")
                 return False
             
             # Test that we can access download client info (shows we have proper permissions)
             download_clients = await self._make_request(manager_type, 'downloadclient')
             if download_clients is None:
-                print(f"Cannot access download clients on {manager_type.value}")
+                logger.info(f"Cannot access download clients on {manager_type.value}")
                 return False
             
             # Verify we can access quality profiles
             quality_profiles = await self._make_request(manager_type, 'qualityprofile')
             if quality_profiles is None:
-                print(f"Cannot access quality profiles on {manager_type.value}")
+                logger.info(f"Cannot access quality profiles on {manager_type.value}")
                 return False
             
-            print(f"Successfully verified API access to {manager_type.value}")
-            print(f"Found {len(download_clients)} download clients and {len(quality_profiles)} quality profiles")
+            logger.info(f"Successfully verified API access to {manager_type.value}")
+            logger.info(f"Found {len(download_clients)} download clients and {len(quality_profiles)} quality profiles")
             
             return True
             
         except Exception as e:
-            print(f"Failed to verify access to {manager_type.value}: {e}")
+            logger.info(f"Failed to verify access to {manager_type.value}: {e}")
             return False
 
     async def discover_managers(self) -> List[Dict]:
@@ -186,7 +187,7 @@ class MediaManagerIntegration:
             # Get local network range
             hostname = socket.gethostname()
             local_ip = socket.gethostbyname(hostname)
-            print(f"Starting discovery from {local_ip}")
+            logger.info(f"Starting discovery from {local_ip}")
             
             # Parse network from local IP (assume /24 subnet)
             network = ipaddress.IPv4Network(f"{local_ip}/24", strict=False)
@@ -211,7 +212,7 @@ class MediaManagerIntegration:
                     
                     # If socket is open, try to identify the service
                     url = f"http://{host_ip}:{port}"
-                    print(f"Found service at {url}, checking if it's {service_name}")
+                    logger.info(f"Found service at {url}, checking if it's {service_name}")
                     
                     # Try to get service information
                     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=3)) as session:
@@ -222,7 +223,7 @@ class MediaManagerIntegration:
                             async with session.get(api_url) as response:
                                 if response.status == 200:
                                     data = await response.json()
-                                    print(f"Confirmed {service_name} at {url}")
+                                    logger.info(f"Confirmed {service_name} at {url}")
                                     return {
                                         "type": manager_type.value,
                                         "url": url,
@@ -232,7 +233,7 @@ class MediaManagerIntegration:
                                         "requires_auth": False
                                     }
                                 elif response.status == 401:
-                                    print(f"Found {service_name} at {url} (requires auth)")
+                                    logger.info(f"Found {service_name} at {url} (requires auth)")
                                     return {
                                         "type": manager_type.value,
                                         "url": url,
@@ -242,14 +243,14 @@ class MediaManagerIntegration:
                                         "requires_auth": True
                                     }
                         except aiohttp.ClientError as e:
-                            print(f"API check failed for {url}: {e}")
+                            logger.info(f"API check failed for {url}: {e}")
                             # Try generic endpoint
                             try:
                                 async with session.get(url) as response:
                                     if response.status == 200:
                                         text = await response.text()
                                         if service_name.lower() in text.lower():
-                                            print(f"Found {service_name} at {url} (web interface)")
+                                            logger.info(f"Found {service_name} at {url} (web interface)")
                                             return {
                                                 "type": manager_type.value,
                                                 "url": url,
@@ -264,7 +265,7 @@ class MediaManagerIntegration:
                 except asyncio.TimeoutError:
                     pass
                 except Exception as e:
-                    print(f"Error checking {host_ip}:{port}: {e}")
+                    logger.info(f"Error checking {host_ip}:{port}: {e}")
                 
                 return None
             
@@ -282,7 +283,7 @@ class MediaManagerIntegration:
                     priority_ips.append(ip)
             
             # Scan priority IPs first
-            print(f"Scanning priority IPs: {priority_ips}")
+            logger.info(f"Scanning priority IPs: {priority_ips}")
             tasks = []
             for host_ip in priority_ips:
                 for port, manager_type, service_name in common_services:
@@ -296,11 +297,11 @@ class MediaManagerIntegration:
                 for result in results:
                     if isinstance(result, dict) and result:
                         discovered.append(result)
-                        print(f"Discovered: {result}")
+                        logger.info(f"Discovered: {result}")
             
             # If we found something, return early for speed
             if discovered:
-                print(f"Found {len(discovered)} services, returning early")
+                logger.info(f"Found {len(discovered)} services, returning early")
                 return discovered
             
             print("No services found in priority scan, doing full scan...")
@@ -329,12 +330,12 @@ class MediaManagerIntegration:
                 for result in results:
                     if isinstance(result, dict) and result:
                         discovered.append(result)
-                        print(f"Discovered: {result}")
+                        logger.info(f"Discovered: {result}")
             
         except Exception as e:
-            print(f"Network discovery error: {e}")
+            logger.info(f"Network discovery error: {e}")
         
-        print(f"Discovery complete. Found {len(discovered)} services.")
+        logger.info(f"Discovery complete. Found {len(discovered)} services.")
         return discovered
     
     async def test_connection(self, manager_type: MediaManagerType, url: str, api_key: str) -> Dict:
@@ -450,9 +451,9 @@ class MediaManagerIntegration:
         try:
             result = await self._make_request(manager_type, 'health')
             # Log the health check result
-            print(f"Health check for {manager_type.value}: {'OK' if result else 'FAILED'}")
+            logger.info(f"Health check for {manager_type.value}: {'OK' if result else 'FAILED'}")
         except Exception as e:
-            print(f"Health check failed for {manager_type.value}: {e}")
+            logger.info(f"Health check failed for {manager_type.value}: {e}")
 
     async def get_categories(self, manager_type: MediaManagerType) -> List[Dict]:
         """Get download categories from a media manager."""

@@ -9,7 +9,6 @@ import {
   CardContent, 
   CardHeader,
   Alert,
-  Divider,
   Stack,
   CircularProgress
 } from '@mui/material';
@@ -80,7 +79,7 @@ const ConfigSettings: React.FC = () => {
   };
 
   useEffect(() => {
-    loadConfig();
+    void loadConfig();
   }, []);
 
   if (loading) {
@@ -99,7 +98,7 @@ const ConfigSettings: React.FC = () => {
         <Stack direction="row" spacing={2}>
           <Button
             startIcon={<RefreshIcon />}
-            onClick={loadConfig}
+            onClick={() => void loadConfig()}
             disabled={loading}
           >
             Reload
@@ -107,7 +106,7 @@ const ConfigSettings: React.FC = () => {
           <Button
             variant="contained"
             startIcon={<SaveIcon />}
-            onClick={saveConfig}
+            onClick={() => void saveConfig()}
             disabled={saving}
           >
             {saving ? 'Saving...' : 'Save'}

@@ -1,198 +1,198 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { 
-  Box, 
   Typography, 
   TextField, 
   Button, 
-  Grid, 
-  Card, 
-  CardContent, 
+  Box,
+  Grid,
+  Card,
+  CardContent,
   CardHeader,
-  Alert,
   Stack,
-  CircularProgress,
+  FormGroup,
+  FormControlLabel,
   Switch,
-  FormControlLabel
+  IconButton,
+  Tooltip,
+  Alert,
 } from '@mui/material';
-import { 
-  Save as SaveIcon, 
-  Refresh as RefreshIcon,
-  TestTube as TestIcon
-} from '@mui/icons-material';
+import { Save as SaveIcon, AddCircle as AddIcon } from '@mui/icons-material';
 
-interface UsenetConfig {
-  server: string;
+interface ServerConfig {
+  name: string;
+  host: string;
   port: number;
-  use_ssl: boolean;
   username: string;
   password: string;
-  max_connections: number;
-  retention_days: number;
-  download_rate_limit: number | null;
-  max_retries: number;
+  ssl: boolean;
+  connections: number;
 }
 
 const UsenetSettings: React.FC = () => {
-  const [config, setConfig] = useState<UsenetConfig>({
-    server: '',
-    port: 563,
-    use_ssl: true,
+  const [config, setConfig] = useState<ServerConfig>({
+    name: 'Primary Server',
+    host: '',
+    port: 119,
     username: '',
     password: '',
-    max_connections: 10,
-    retention_days: 1500,
-    download_rate_limit: null,
-    max_retries: 3
+    ssl: false,
+    connections: 5
   });
-  
-  const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
 
-  const loadConfig = async () => {
-    setLoading(true);
-    try {
-      const response = await fetch('/api/config/usenet');
-      if (response.ok) {
-        const data = await response.json();
-        setConfig(data);
-        setMessage('Configuration loaded successfully');
-      } else {
-        setMessage('Failed to load configuration');
-      }
-    } catch (error) {
-      setMessage(`Error: ${error}`);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const saveConfig = async () => {
+  const handleSave = async () => {
     setSaving(true);
     try {
-      const response = await fetch('/api/config/usenet', {
+      const response = await fetch('/api/usenet/config', {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+        },
         body: JSON.stringify(config),
       });
       
       if (response.ok) {
-        setMessage('Configuration saved successfully');
+        setMessage('Settings saved successfully');
       } else {
-        setMessage('Failed to save configuration');
+        setMessage('Failed to save settings');
       }
     } catch (error) {
-      setMessage(`Error: ${error}`);
+      console.error('Error saving settings:', error);
+      setMessage('Error saving settings');
     } finally {
       setSaving(false);
     }
   };
 
-  useEffect(() => {
-    loadConfig();
-  }, []);
-
-  if (loading) {
-    return (
-      <Box display="flex" justifyContent="center" p={4}>
-        <CircularProgress />
-      </Box>
-    );
-  }
-
   return (
-    <Box>
-      <Typography variant="h4" gutterBottom>
-        🗞️ Usenet Configuration
-      </Typography>
-      
-      {message && (
-        <Alert 
-          severity={message.includes('success') ? 'success' : 'error'} 
-          sx={{ mb: 3 }}
-        >
-          {message}
-        </Alert>
-      )}
+    <Box sx={{ maxWidth: 800, mx: 'auto', mt: 2 }}>
+      <Stack spacing={3}>
+        <Stack direction="row" justifyContent="space-between" alignItems="center">
+          <Typography variant="h5">Usenet Settings</Typography>
+          <Button
+            variant="contained"
+            startIcon={<SaveIcon />}
+            onClick={handleSave}
+            disabled={saving}
+          >
+            {saving ? 'Saving...' : 'Save Settings'}
+          </Button>
+        </Stack>
 
-      <Card>
-        <CardHeader title="Usenet Server Settings" />
-        <CardContent>
-          <Grid container spacing={3}>
-            <Grid item xs={12} md={8}>
-              <TextField
-                fullWidth
-                label="Server"
-                value={config.server}
-                onChange={(e) => setConfig({...config, server: e.target.value})}
-              />
-            </Grid>
-            
-            <Grid item xs={12} md={4}>
-              <TextField
-                fullWidth
-                label="Port"
-                type="number"
-                value={config.port}
-                onChange={(e) => setConfig({...config, port: Number(e.target.value)})}
-              />
-            </Grid>
+        {message && (
+          <Alert severity={message.includes('successfully') ? 'success' : 'error'}>
+            {message}
+          </Alert>
+        )}
 
-            <Grid item xs={12} md={6}>
-              <TextField
-                fullWidth
-                label="Username"
-                value={config.username}
-                onChange={(e) => setConfig({...config, username: e.target.value})}
-              />
-            </Grid>
-
-            <Grid item xs={12} md={6}>
-              <TextField
-                fullWidth
-                label="Password"
-                type="password"
-                value={config.password}
-                onChange={(e) => setConfig({...config, password: e.target.value})}
-              />
-            </Grid>
-
-            <Grid item xs={12}>
-              <FormControlLabel
-                control={
-                  <Switch
-                    checked={config.use_ssl}
-                    onChange={(e) => setConfig({...config, use_ssl: e.target.checked})}
+        <Card>
+          <CardHeader 
+            title="Server Settings"
+            action={
+              <Tooltip title="Add Additional Server">
+                <IconButton>
+                  <AddIcon />
+                </IconButton>
+              </Tooltip>
+            }
+          />
+          <CardContent>
+            <Grid container spacing={3}>
+              <Grid item xs={12}>
+                <TextField
+                  fullWidth
+                  label="Server Name"
+                  value={config.name}
+                  onChange={(e) => setConfig({ ...config, name: e.target.value })}
+                />
+              </Grid>
+              <Grid item xs={12} sm={8}>
+                <TextField
+                  fullWidth
+                  label="Host"
+                  value={config.host}
+                  onChange={(e) => setConfig({ ...config, host: e.target.value })}
+                />
+              </Grid>
+              <Grid item xs={12} sm={4}>
+                <TextField
+                  fullWidth
+                  label="Port"
+                  type="number"
+                  value={config.port}
+                  onChange={(e) => setConfig({ ...config, port: parseInt(e.target.value) || 119 })}
+                />
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <TextField
+                  fullWidth
+                  label="Username"
+                  value={config.username}
+                  onChange={(e) => setConfig({ ...config, username: e.target.value })}
+                />
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <TextField
+                  fullWidth
+                  label="Password"
+                  type="password"
+                  value={config.password}
+                  onChange={(e) => setConfig({ ...config, password: e.target.value })}
+                />
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <FormGroup>
+                  <FormControlLabel
+                    control={
+                      <Switch
+                        checked={config.ssl}
+                        onChange={(e) => setConfig({ ...config, ssl: e.target.checked })}
+                      />
+                    }
+                    label="Use SSL"
                   />
-                }
-                label="Use SSL"
-              />
+                </FormGroup>
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <TextField
+                  fullWidth
+                  label="Max Connections"
+                  type="number"
+                  value={config.connections}
+                  onChange={(e) => setConfig({ ...config, connections: parseInt(e.target.value) || 5 })}
+                />
+              </Grid>
             </Grid>
+          </CardContent>
+        </Card>
 
-            <Grid item xs={12}>
-              <Stack direction="row" spacing={2}>
-                <Button
-                  variant="contained"
-                  startIcon={saving ? <CircularProgress size={20} /> : <SaveIcon />}
-                  onClick={saveConfig}
-                  disabled={saving}
-                >
-                  {saving ? 'Saving...' : 'Save'}
-                </Button>
-
-                <Button
-                  variant="outlined"
-                  startIcon={<RefreshIcon />}
-                  onClick={loadConfig}
-                  disabled={saving}
-                >
-                  Reload
-                </Button>
-              </Stack>
+        <Card>
+          <CardHeader title="Connection Info" />
+          <CardContent>
+            <Grid container spacing={2}>
+              <Grid item xs={12} sm={4}>
+                <Typography variant="subtitle2" color="textSecondary">
+                  Status
+                </Typography>
+                <Typography>Connected</Typography>
+              </Grid>
+              <Grid item xs={12} sm={4}>
+                <Typography variant="subtitle2" color="textSecondary">
+                  Active Connections
+                </Typography>
+                <Typography>3/5</Typography>
+              </Grid>
+              <Grid item xs={12} sm={4}>
+                <Typography variant="subtitle2" color="textSecondary">
+                  Speed
+                </Typography>
+                <Typography>2.5 MB/s</Typography>
+              </Grid>
             </Grid>
-          </Grid>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      </Stack>
     </Box>
   );
 };

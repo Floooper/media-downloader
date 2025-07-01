@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
     Card,
     Text,
@@ -9,7 +9,6 @@ import {
     Progress,
     ActionIcon,
     Menu,
-    Divider,
     Paper,
     SimpleGrid,
     Tooltip,
@@ -32,7 +31,7 @@ import { showNotification } from '@mantine/notifications';
 import { TorrentDetails } from './TorrentDetails';
 import { DownloadTagManager } from './DownloadTagManager';
 import { Download, DownloadStatus, DownloadType } from '../types/api';
-import { downloadService, tagService } from '../services/api';
+import { downloadService } from '../services/api';
 import logger from '../services/logging';
 
 interface QueueStats {
@@ -44,6 +43,21 @@ interface QueueStats {
     totalSpeed: number;
     estimatedTime: string;
 }
+
+const calculateEstimatedTime = (downloads: Download[]): string => {
+    const activeDownloads = downloads.filter(d => d.status === DownloadStatus.DOWNLOADING);
+    if (activeDownloads.length === 0) return '0s';
+
+    const maxTime = Math.max(
+        ...activeDownloads.map(d => {
+            const remaining = 100 - d.progress;
+            return (remaining / (d.speed || 1)) * 60; // minutes
+        })
+    );
+
+    if (maxTime < 60) return `${Math.round(maxTime)}m`;
+    return `${Math.round(maxTime / 60)}h ${Math.round(maxTime % 60)}m`;
+};
 
 export function QueueManager() {
     const [downloads, setDownloads] = useState<Download[]>([]);
@@ -60,7 +74,7 @@ export function QueueManager() {
     const [tagManagerOpen, setTagManagerOpen] = useState(false);
     const [selectedDownload, setSelectedDownload] = useState<Download | null>(null);
 
-    const fetchDownloads = async () => {
+    const fetchDownloads = useCallback(async () => {
         try {
             logger.debug('Fetching downloads and queue status', 'QueueManager');
             const [downloadsList, stats] = await Promise.all([
@@ -81,28 +95,8 @@ export function QueueManager() {
         } catch (error) {
             logger.error('Failed to fetch downloads', 'QueueManager', error);
             console.error('Failed to fetch downloads:', error);
-//             // COMMENTED OUT: showNotification({
-//                 title: 'Error',
-//                 message: 'Failed to fetch downloads',
-//                 color: 'red',
-//             });
         }
-    };
-
-    const calculateEstimatedTime = (downloads: Download[]): string => {
-        const activeDownloads = downloads.filter(d => d.status === DownloadStatus.DOWNLOADING);
-        if (activeDownloads.length === 0) return '0s';
-
-        const maxTime = Math.max(
-            ...activeDownloads.map(d => {
-                const remaining = 100 - d.progress;
-                return (remaining / (d.speed || 1)) * 60; // minutes
-            })
-        );
-
-        if (maxTime < 60) return `${Math.round(maxTime)}m`;
-        return `${Math.round(maxTime / 60)}h ${Math.round(maxTime % 60)}m`;
-    };
+    }, []);
 
     const handlePauseResume = async (download: Download) => {
         console.log("🔄 handlePauseResume called for download:", download.id);
@@ -204,11 +198,12 @@ export function QueueManager() {
         }
     };
 
-    const onDragEnd = async (result: any) => {
-        if (!result.destination) return;
+    const onDragEnd = async (result: unknown) => {
+        const dragResult = result as { destination?: { index: number }, source: { index: number } };
+        if (!dragResult.destination) return;
 
-        const sourceIndex = result.source.index;
-        const destinationIndex = result.destination.index;
+        const sourceIndex = dragResult.source.index;
+        const destinationIndex = dragResult.destination.index;
 
         if (sourceIndex === destinationIndex) return;
 
@@ -230,7 +225,7 @@ export function QueueManager() {
         fetchDownloads();
         const interval = setInterval(fetchDownloads, 5000);
         return () => clearInterval(interval);
-    }, []);
+    }, [fetchDownloads]);
 
     const getStatusColor = (status: DownloadStatus): string => {
         switch (status) {
@@ -460,4 +455,3 @@ export function QueueManager() {
         </Stack>
     );
 }
-
